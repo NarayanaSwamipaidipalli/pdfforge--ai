@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdfforge-worker-cluster
+  namespace: pdfforge-production
+  labels:
+    app.kubernetes.io/name: pdfforge-worker
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: pdfforge-worker
+  template:
+    metadata:
+      labels:
+        app: pdfforge-worker
+    spec:
+      containers:
+        - name: celery-worker
+          image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/pdfforge-worker:v1.0.0
+          command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+          envFrom:
+            - configMapRef:
+                name: pdfforge-config
+            - secretRef:
+                name: pdfforge-secrets
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "2Gi"
+            limits:
+              cpu: "4000m"
+              memory: "8Gi"
+          volumeMounts:
+            - name: ephemeral-scratch
+              mountPath: /tmp/pdfforge
+      volumes:
+        - name: ephemeral-scratch
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pdfforge-worker-hpa
+  namespace: pdfforge-production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pdfforge-worker-cluster
+  minReplicas: 8
+  maxReplicas: 100
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

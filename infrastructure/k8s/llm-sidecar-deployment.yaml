@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdfforge-llm-sidecar
+  namespace: pdfforge-production
+  labels:
+    app.kubernetes.io/name: pdfforge-llm-sidecar
+    app.kubernetes.io/part-of: pdfforge-ai
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pdfforge-llm-sidecar
+  template:
+    metadata:
+      labels:
+        app: pdfforge-llm-sidecar
+    spec:
+      # Route to GPU-enabled node pool if available
+      nodeSelector:
+        node.kubernetes.io/instance-type: "g5.xlarge" # AWS EC2 Nvidia A10G 24GB VRAM
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 11434
+              name: http
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+            - name: OLLAMA_HOST
+              value: "0.0.0.0"
+            - name: OLLAMA_NUM_PARALLEL
+              value: "4"
+          resources:
+            requests:
+              cpu: "4000m"
+              memory: "16Gi"
+              nvidia.com/gpu: "1" # Request 1 Dedicated GPU
+            limits:
+              cpu: "8000m"
+              memory: "32Gi"
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: model-weights
+              mountPath: /root/.ollama
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: model-weights
+          persistentVolumeClaim:
+            claimName: pdfforge-llm-weights-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pdfforge-llm-weights-pvc
+  namespace: pdfforge-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: "gp3"
+  resources:
+    requests:
+      storage: 150Gi # Holds Llama 3.1 8B, Mistral 7B, and Nomic Embed weights
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdfforge-llm-service
+  namespace: pdfforge-production
+spec:
+  type: ClusterIP
+  ports:
+    - port: 11434
+      targetPort: 11434
+      protocol: TCP
+      name: http
+  selector:
+    app: pdfforge-llm-sidecar

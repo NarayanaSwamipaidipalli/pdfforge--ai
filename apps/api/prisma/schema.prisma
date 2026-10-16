@@ -1,0 +1,333 @@
+// PDFForge AI - Enterprise Prisma Database Schema
+// Optimized for PostgreSQL 16 with pgvector support
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "fullTextSearchPostgres"]
+}
+
+enum GlobalRole {
+  USER
+  SUPPORT
+  ADMIN
+  SUPERADMIN
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+enum JobPriority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model User {
+  id               String       @id @default(uuid())
+  email            String       @unique
+  passwordHash     String?
+  name             String?
+  avatarUrl        String?
+  globalRole       GlobalRole   @default(USER)
+  plan             PlanTier     @default(FREE)
+  isEmailVerified  Boolean      @default(false)
+  twoFactorEnabled Boolean      @default(false)
+  twoFactorSecret  String?
+  refreshTokenHash String?
+  
+  // Storage & Quotas
+  conversionsToday Int          @default(0)
+  lastConversionAt DateTime?
+  storageUsedBytes BigInt       @default(0)
+
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  // Relationships
+  memberships      OrganizationMember[]
+  ownedOrgs        Organization[]       @relation("OrgOwner")
+  files            FileRecord[]
+  jobs             ProcessingJob[]
+  apiKeys          ApiKey[]
+  auditLogs        AuditLog[]
+  subscriptions    Subscription[]
+  aiConversations  AiConversation[]
+
+  @@index([email])
+  @@index([plan])
+  @@map("users")
+}
+
+model Organization {
+  id                String       @id @default(uuid())
+  name              String
+  slug              String       @unique
+  ownerId           String
+  plan              PlanTier     @default(BUSINESS)
+  storageLimitBytes BigInt       @default(53687091200) // 50 GB default for business
+  storageUsedBytes  BigInt       @default(0)
+  monthlyJobsLimit  Int          @default(10000)
+  jobsUsedThisMonth Int          @default(0)
+
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  // Relationships
+  owner             User                 @relation("OrgOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members           OrganizationMember[]
+  files             FileRecord[]
+  jobs              ProcessingJob[]
+  apiKeys           ApiKey[]
+  subscriptions     Subscription[]
+  auditLogs         AuditLog[]
+
+  @@index([slug])
+  @@index([ownerId])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  orgId          String
+  userId         String
+  role           OrgRole      @default(MEMBER)
+  joinedAt       DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([orgId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+model Subscription {
+  id                     String             @id @default(uuid())
+  userId                 String?
+  orgId                  String?
+  plan                   PlanTier           @default(PRO)
+  status                 SubscriptionStatus @default(ACTIVE)
+  
+  // Payment Provider details
+  provider               String             @default("stripe") // "stripe" | "razorpay"
+  stripeCustomerId       String?            @unique
+  stripeSubscriptionId   String?            @unique
+  razorpaySubscriptionId String?            @unique
+  
+  currentPeriodStart     DateTime
+  currentPeriodEnd       DateTime
+  cancelAtPeriodEnd      Boolean            @default(false)
+  canceledAt             DateTime?
+
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user                   User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization           Organization?      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model FileRecord {
+  id              String         @id @default(uuid())
+  userId          String?
+  orgId           String?
+  originalName    String
+  storedKey       String         @unique
+  fileSizeBytes   BigInt
+  mimeType        String         @default("application/pdf")
+  pageCount       Int?
+  checksumSha256  String
+  
+  // Security & Ephemeral State
+  isVirusScanned  Boolean        @default(false)
+  isClean         Boolean        @default(true)
+  isEncrypted     Boolean        @default(true)
+  encryptionKeyId String?
+  expiresAt       DateTime       // Auto-deletion timestamp (24h default)
+
+  createdAt       DateTime       @default(now())
+  deletedAt       DateTime?
+
+  user            User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization    Organization?  @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  embeddings      AiEmbedding[]
+  aiConversations AiConversation[]
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([expiresAt])
+  @@index([storedKey])
+  @@map("file_records")
+}
+
+model ProcessingJob {
+  id                  String        @id @default(uuid())
+  userId              String?
+  orgId               String?
+  tool                String        // e.g. "merge", "split", "compress", "ocr", "pdf_to_word"
+  status              JobStatus     @default(QUEUED)
+  priority            JobPriority   @default(NORMAL)
+  
+  inputFilesPayload   Json          // List of file IDs and original names
+  parametersPayload   Json          // Tool specific configuration options
+  
+  outputFileKey       String?
+  outputFileSizeBytes BigInt?
+  progress            Int           @default(0) // 0-100%
+  errorMessage        String?
+  durationMs          Int?
+  workerInstanceId    String?
+
+  createdAt           DateTime      @default(now())
+  startedAt           DateTime?
+  completedAt         DateTime?
+
+  user                User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization        Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([status])
+  @@index([tool])
+  @@index([createdAt])
+  @@map("processing_jobs")
+}
+
+model ApiKey {
+  id           String        @id @default(uuid())
+  userId       String
+  orgId        String?
+  name         String
+  keyPrefix    String        @db.VarChar(12) // e.g. "pdf_live_9a"
+  keyHash      String        @unique
+  permissions  Json          // List of scopes e.g. ["pdf:process", "ai:query"]
+  rateLimitRpm Int           @default(120)
+  lastUsedAt   DateTime?
+  expiresAt    DateTime?
+  createdAt    DateTime      @default(now())
+  revokedAt    DateTime?
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([keyPrefix])
+  @@index([userId])
+  @@index([orgId])
+  @@map("api_keys")
+}
+
+model AiConversation {
+  id          String        @id @default(uuid())
+  userId      String
+  fileId      String
+  title       String        @default("Document Conversation")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  file        FileRecord    @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  messages    AiMessage[]
+
+  @@index([userId])
+  @@index([fileId])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String         @id @default(uuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  citations      Json?          // [{ page: 1, snippet: "...", confidence: 0.98 }]
+  tokensUsed     Int            @default(0)
+  createdAt      DateTime       @default(now())
+
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("ai_messages")
+}
+
+model AiEmbedding {
+  id          String      @id @default(uuid())
+  fileId      String
+  chunkIndex  Int
+  pageNumber  Int
+  textSnippet String
+  // Vector embeddings stored as array or raw string for pgvector compatibility
+  embedding   Json        // Float array representation
+  tokenCount  Int
+  createdAt   DateTime    @default(now())
+
+  file        FileRecord  @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId, pageNumber])
+  @@map("ai_embeddings")
+}
+
+model AuditLog {
+  id           String        @id @default(uuid())
+  userId       String?
+  orgId        String?
+  action       String        // e.g. "AUTH_LOGIN", "FILE_PROCESSED", "KEY_GENERATED", "USER_ROLE_CHANGED"
+  resource     String?       // Target entity e.g. "file_8921e0ab"
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?
+  createdAt    DateTime      @default(now())
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

@@ -1,0 +1,36 @@
+import { Controller, Post, Body, Get, UseGuards, Req } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { BillingService } from './billing.service';
+import { CreateCheckoutSessionDto } from './dto/billing.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/roles.decorator';
+import { Request } from 'express';
+
+@ApiTags('Billing & Subscriptions')
+@Controller('api/v1/billing')
+export class BillingController {
+  constructor(private readonly billingService: BillingService) {}
+
+  @Get('plans')
+  @ApiOperation({ summary: 'Retrieve subscription plans catalog, features, and quotas' })
+  getPlans() {
+    return this.billingService.getPlansCatalog();
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('checkout')
+  @ApiOperation({ summary: 'Initialize Stripe Checkout Session or Razorpay Order' })
+  async createCheckout(
+    @Body() dto: CreateCheckoutSessionDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.billingService.createCheckoutSession(userId, dto);
+  }
+
+  @Post('webhook/stripe')
+  @ApiOperation({ summary: 'Stripe webhook receiver for asynchronous subscription events' })
+  async handleStripeWebhook(@Body() event: any) {
+    return this.billingService.handleStripeWebhook(event);
+  }
+}

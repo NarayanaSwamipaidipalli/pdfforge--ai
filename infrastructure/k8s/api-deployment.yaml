@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdfforge-api-gateway
+  namespace: pdfforge-production
+  labels:
+    app.kubernetes.io/name: pdfforge-api-gateway
+    app.kubernetes.io/part-of: pdfforge-ai
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: pdfforge-api-gateway
+  template:
+    metadata:
+      labels:
+        app: pdfforge-api-gateway
+    spec:
+      containers:
+        - name: api
+          image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/pdfforge-api:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - configMapRef:
+                name: pdfforge-config
+            - secretRef:
+                name: pdfforge-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          readinessProbe:
+            httpGet:
+              path: /api/docs
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/docs
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdfforge-api-service
+  namespace: pdfforge-production
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4000
+      targetPort: 4000
+      protocol: TCP
+  selector:
+    app: pdfforge-api-gateway
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pdfforge-api-hpa
+  namespace: pdfforge-production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pdfforge-api-gateway
+  minReplicas: 5
+  maxReplicas: 30
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

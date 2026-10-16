@@ -1,0 +1,88 @@
+name: PDFForge AI Enterprise CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-api:
+    name: Backend API Gateway Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'apps/api/package.json'
+
+      - name: Install API Dependencies
+        working-directory: ./apps/api
+        run: npm ci
+
+      - name: Validate Prisma Schema
+        working-directory: ./apps/api
+        run: npx prisma validate
+
+      - name: Run Jest Unit Tests
+        working-directory: ./apps/api
+        run: npm test
+
+  test-worker:
+    name: Python PDF Worker Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python Dependencies
+        working-directory: ./services/pdf-worker
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Python Worker Unit Tests
+        working-directory: ./services/pdf-worker
+        run: python -m unittest discover tests
+
+  build-containers:
+    name: Docker Container Image Validation
+    runs-on: ubuntu-latest
+    needs: [test-api, test-worker]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Web Container
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/web
+          push: false
+          tags: pdfforge-web:test
+
+      - name: Build API Container
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/api
+          push: false
+          tags: pdfforge-api:test
+
+      - name: Build Worker Container
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/pdf-worker
+          push: false
+          tags: pdfforge-worker:test
