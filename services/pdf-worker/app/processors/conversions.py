@@ -49,12 +49,21 @@ def images_to_pdf(image_paths: List[str], output_path: str) -> str:
 def pdf_to_word(input_path: str, output_path: str) -> str:
     """Converts PDF document to editable Microsoft Word .docx format."""
     try:
-        from pdf2docx import Converter
-        cv = Converter(input_path)
-        cv.convert(output_path, start=0, end=None)
-        cv.close()
+        from docx import Document
+        doc = Document()
+        pdf = fitz.open(input_path)
+        for i, page in enumerate(pdf):
+            if i > 0:
+                doc.add_page_break()
+            text = page.get_text()
+            for paragraph in text.split("\n\n"):
+                cleaned = paragraph.strip()
+                if cleaned:
+                    doc.add_paragraph(cleaned)
+        pdf.close()
+        doc.save(output_path)
     except Exception as e:
-        # Fallback to text extraction format if pdf2docx is not installed
+        # Fallback to text extraction format
         doc = fitz.open(input_path)
         text_content = ""
         for page in doc:

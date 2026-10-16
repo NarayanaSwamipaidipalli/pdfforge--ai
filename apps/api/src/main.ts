@@ -6,6 +6,12 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import helmet from 'helmet';
 
 async function bootstrap() {
+  // Support BigInt serialization in JSON responses
+  (BigInt.prototype as any).toJSON = function () {
+    const intVal = Number(this);
+    return intVal <= Number.MAX_SAFE_INTEGER ? intVal : this.toString();
+  };
+
   const logger = new Logger('PDFForge-APIGateway');
   const app = await NestFactory.create(AppModule, {
     cors: {
