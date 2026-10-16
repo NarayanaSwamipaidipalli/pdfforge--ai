@@ -48,8 +48,9 @@ services:
     volumes:
       - minio_data:/data
 
-  # Ollama On-Premise Air-Gapped Private LLM Sidecar
+  # Ollama On-Premise Air-Gapped Private LLM Sidecar (Optional profile)
   ollama:
+    profiles: ["onprem-llm"]
     image: ollama/ollama:latest
     container_name: pdfforge-ollama-sidecar
     restart: always
