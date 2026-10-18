@@ -1,0 +1,23 @@
+{
+  "name": "pdfforge-cli",
+  "version": "1.0.0",
+  "description": "Official CLI for PDFForge AI Enterprise Platform",
+  "bin": {
+    "pdfforge": "./dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js"
+  },
+  "keywords": ["pdfforge", "pdf", "cli", "ai", "ocr"],
+  "author": "PDFForge AI Architecture Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.11",
+    "typescript": "^5.5.3"
+  }
+}

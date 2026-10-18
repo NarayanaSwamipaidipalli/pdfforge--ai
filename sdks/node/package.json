@@ -1,0 +1,29 @@
+{
+  "name": "@pdfforge/sdk",
+  "version": "1.0.0",
+  "description": "Official Node.js & TypeScript SDK for PDFForge AI Enterprise Platform",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "pdfforge",
+    "pdf",
+    "ai",
+    "ocr",
+    "rag",
+    "document-intelligence",
+    "pdf-processing",
+    "sdk"
+  ],
+  "author": "PDFForge AI Architecture Team",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.14.11",
+    "typescript": "^5.5.3"
+  }
+}
