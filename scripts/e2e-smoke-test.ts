@@ -4,6 +4,7 @@
  */
 
 import * as crypto from 'crypto';
+import * as http from 'http';
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:4000/api/v1';
 const WORKER_BASE = process.env.WORKER_BASE_URL || 'http://localhost:8000';
@@ -118,6 +119,9 @@ async function main() {
   log('📦', 'Stage 3: S3 Direct Multipart Upload & Storage Plane');
   await runTest('Direct Upload Simulation & Lifecycle Confirmation', async () => {
     // 1. Presign
+    const mockPdfBytes = Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF');
+    const checksumSha256 = crypto.createHash('sha256').update(mockPdfBytes).digest('hex');
+
     const presignRes = await fetch(`${API_BASE}/files/presign-upload`, {
       method: 'POST',
       headers: {
@@ -126,21 +130,42 @@ async function main() {
       },
       body: JSON.stringify({
         fileName: 'Integration_Test_Spec.pdf',
-        fileSizeBytes: 2048,
+        fileSizeBytes: mockPdfBytes.length,
         mimeType: 'application/pdf',
+        checksumSha256,
       }),
     });
     if (!presignRes.ok) throw new Error(`Presign failed: ${await presignRes.text()}`);
     const presign = await presignRes.json() as any;
 
-    // 2. Put to S3 / MinIO
-    const mockPdfBytes = Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF');
-    const uploadRes = await fetch(presign.uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/pdf' },
-      body: mockPdfBytes,
+    // 2. Put to S3 / MinIO (preserves Host: minio:9000)
+    await new Promise<void>((resolve, reject) => {
+      const parsedUrl = new URL(presign.uploadUrl);
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: 9000,
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: 'PUT',
+        headers: {
+          'Host': parsedUrl.host,
+          'Content-Type': 'application/pdf',
+          'Content-Length': mockPdfBytes.length,
+        },
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve();
+          } else {
+            reject(new Error(`S3 PUT failed with HTTP ${res.statusCode}: ${body}`));
+          }
+        });
+      });
+      req.on('error', reject);
+      req.write(mockPdfBytes);
+      req.end();
     });
-    if (!uploadRes.ok) throw new Error(`S3 PUT failed with HTTP ${uploadRes.status}`);
 
     // 3. Confirm
     const confirmRes = await fetch(`${API_BASE}/files/confirm-upload`, {
@@ -153,7 +178,7 @@ async function main() {
     });
     if (!confirmRes.ok) throw new Error(`Confirm failed: ${await confirmRes.text()}`);
     const confirmed = await confirmRes.json() as any;
-    ctx.fileId = confirmed.id;
+    ctx.fileId = confirmed.file?.id || presign.fileId;
   });
 
   // 4. Job Processing
@@ -173,7 +198,7 @@ async function main() {
     });
     if (!res.ok) throw new Error(`Job creation failed: ${await res.text()}`);
     const job = await res.json() as any;
-    ctx.jobId = job.id;
+    ctx.jobId = job.jobId || job.id;
   });
 
   await runTest('Query Job Status & Progress', async () => {
@@ -207,7 +232,7 @@ async function main() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${ctx.token}`,
       },
-      body: JSON.stringify({ fileId: ctx.fileId, mode: 'bullet_points' }),
+      body: JSON.stringify({ fileId: ctx.fileId, length: 'balanced' }),
     });
     if (!res.ok) throw new Error(`AI Summarize failed: ${await res.text()}`);
     const summary = await res.json() as any;

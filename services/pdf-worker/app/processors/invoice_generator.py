@@ -70,9 +70,9 @@ def generate_invoice_pdf(data: Dict[str, Any]) -> bytes:
     elements = []
 
     # 1. Header Section
-    invoice_number = data.get('invoiceNumber', f"INV-{datetime.utcnow().strftime('%Y%m')}-001")
-    invoice_date = data.get('invoiceDate', datetime.utcnow().strftime('%B %d, %Y'))
-    due_date = data.get('dueDate', datetime.utcnow().strftime('%B %d, %Y'))
+    invoice_number = data.get('invoiceNumber') or f"INV-{datetime.utcnow().strftime('%Y%m')}-001"
+    invoice_date = data.get('invoiceDate') or datetime.utcnow().strftime('%B %d, %Y')
+    due_date = data.get('dueDate') or datetime.utcnow().strftime('%B %d, %Y')
 
     header_table_data = [
         [
@@ -89,10 +89,10 @@ def generate_invoice_pdf(data: Dict[str, Any]) -> bytes:
     elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=15))
 
     # 2. Bill To Section
-    customer_name = data.get('customerName', 'Valued Customer')
-    customer_email = data.get('customerEmail', 'finance@company.com')
-    organization = data.get('organizationName', 'Personal Workspace')
-    plan_tier = data.get('planTier', 'PRO')
+    customer_name = data.get('customerName') or 'Valued Customer'
+    customer_email = data.get('customerEmail') or 'finance@company.com'
+    organization = data.get('organizationName') or 'Personal Workspace'
+    plan_tier = data.get('planTier') or 'PRO'
 
     bill_to_data = [
         [
@@ -113,19 +113,19 @@ def generate_invoice_pdf(data: Dict[str, Any]) -> bytes:
     elements.append(Spacer(1, 10))
 
     # 3. Line Items Table
-    items: List[Dict[str, Any]] = data.get('items', [
+    items: List[Dict[str, Any]] = data.get('items') or [
         {
             "description": f"PDFForge AI {plan_tier} Platform Subscription (1 Month)",
             "quantity": 1,
             "unitPrice": 12.00 if plan_tier == 'PRO' else 49.00,
             "amount": 12.00 if plan_tier == 'PRO' else 49.00,
         }
-    ])
+    ]
 
     subtotal = sum(item.get('amount', 0) for item in items)
     tax = round(subtotal * 0.0825, 2)
     total = round(subtotal + tax, 2)
-    currency = data.get('currency', 'USD')
+    currency = data.get('currency') or 'USD'
 
     items_table_data = [
         [

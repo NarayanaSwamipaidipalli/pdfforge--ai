@@ -219,7 +219,7 @@ export class BillingService {
       where: { id: userId },
       include: {
         subscriptions: true,
-        organizations: { include: { organization: true } },
+        memberships: { include: { organization: true } },
       },
     });
 
@@ -227,7 +227,7 @@ export class BillingService {
       throw new NotFoundException('User not found');
     }
 
-    const org = user.organizations[0]?.organization;
+    const org = user.memberships[0]?.organization;
     const invoiceNum = `INV-2026-${userId.substring(0, 4).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const workerUrl = this.configService.get<string>('PDF_WORKER_URL', 'http://localhost:8000');
 
