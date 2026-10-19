@@ -73,3 +73,36 @@ async def dispatch_job(payload: ProcessJobRequest, background_tasks: BackgroundT
             "jobId": payload.jobId,
             "info": str(e)
         }
+
+from fastapi.responses import Response
+from app.processors.invoice_generator import generate_invoice_pdf
+
+class GenerateInvoiceRequest(BaseModel):
+    invoiceNumber: Optional[str] = None
+    invoiceDate: Optional[str] = None
+    dueDate: Optional[str] = None
+    customerName: Optional[str] = "Valued Customer"
+    customerEmail: Optional[str] = "billing@company.com"
+    organizationName: Optional[str] = "Enterprise Workspace"
+    planTier: Optional[str] = "PRO"
+    items: Optional[List[Dict[str, Any]]] = None
+    currency: Optional[str] = "USD"
+    checksum: Optional[str] = None
+
+@app.post("/api/v1/invoices/generate")
+async def generate_invoice_endpoint(payload: GenerateInvoiceRequest):
+    """
+    Generates an enterprise vector PDF invoice receipt using ReportLab.
+    """
+    try:
+        pdf_bytes = generate_invoice_pdf(payload.model_dump())
+        filename = payload.invoiceNumber or "invoice"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}.pdf"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Invoice generation failed: {str(e)}")

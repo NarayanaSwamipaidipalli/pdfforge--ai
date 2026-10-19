@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCheckoutSessionDto, BillingProvider, SubscriptionTier } from './dto/billing.dto';
 import Stripe from 'stripe';
+import axios from 'axios';
 
 @Injectable()
 export class BillingService {
@@ -211,5 +212,46 @@ export class BillingService {
     }
 
     return { received: true };
+  }
+
+  async generateInvoicePdf(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        subscriptions: true,
+        organizations: { include: { organization: true } },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const org = user.organizations[0]?.organization;
+    const invoiceNum = `INV-2026-${userId.substring(0, 4).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const workerUrl = this.configService.get<string>('PDF_WORKER_URL', 'http://localhost:8000');
+
+    try {
+      const res = await axios.post(
+        `${workerUrl}/api/v1/invoices/generate`,
+        {
+          invoiceNumber: invoiceNum,
+          customerName: user.name || 'Valued Customer',
+          customerEmail: user.email,
+          organizationName: org?.name || 'Personal Workspace',
+          planTier: user.plan,
+          currency: 'USD',
+        },
+        { responseType: 'arraybuffer' },
+      );
+
+      return {
+        invoiceNumber: invoiceNum,
+        buffer: Buffer.from(res.data),
+      };
+    } catch (err) {
+      this.logger.error(`Invoice worker error: ${(err as Error).message}`);
+      throw new BadRequestException('Invoice generation failed');
+    }
   }
 }
