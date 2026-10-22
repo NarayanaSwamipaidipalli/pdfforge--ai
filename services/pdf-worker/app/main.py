@@ -33,7 +33,7 @@ def health_check():
             "merge", "split", "compress", "rotate", "delete_pages",
             "extract_pages", "reorder", "watermark", "encrypt", "decrypt",
             "pdf_to_word", "pdf_to_excel", "pdf_to_images", "images_to_pdf",
-            "ocr", "compare", "repair", "metadata"
+            "ocr", "compare", "repair", "metadata", "signature", "bates", "redact"
         ]
     }
 

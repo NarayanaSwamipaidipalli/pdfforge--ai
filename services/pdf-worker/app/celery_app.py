@@ -60,6 +60,12 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
             basic_tools.compress_pdf(input_paths[0], output_path, parameters.get("compressionLevel", "medium"))
         elif tool == "rotate":
             basic_tools.rotate_pdf(input_paths[0], output_path, parameters.get("rotationDegrees", 90))
+        elif tool in ["delete_pages", "delete"]:
+            basic_tools.delete_pages(input_paths[0], output_path, parameters.get("pagesToDelete", []))
+        elif tool in ["extract_pages", "extract"]:
+            basic_tools.extract_pages(input_paths[0], output_path, parameters.get("pagesToExtract", []))
+        elif tool in ["reorder", "reorder_pages"]:
+            basic_tools.reorder_pages(input_paths[0], output_path, parameters.get("newOrder", []))
         elif tool == "watermark":
             basic_tools.add_watermark(
                 input_paths[0],
@@ -77,6 +83,10 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
             output_path = img_files[0] if img_files else output_path
         elif tool in ["images_to_pdf", "jpg_to_pdf"]:
             conversions.images_to_pdf(input_paths, output_path)
+        elif tool in ["pdf_to_word", "pdf_to_docx"]:
+            output_file_name = f"result_{job_id}.docx"
+            output_path = os.path.join(work_dir, output_file_name)
+            conversions.pdf_to_word(input_paths[0], output_path)
         elif tool == "ocr":
             advanced_tools.ocr_pdf(input_paths[0], output_path, parameters.get("ocrLanguage", "eng"))
         elif tool == "repair":
@@ -88,6 +98,31 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 title=parameters.get("title"),
                 author=parameters.get("author")
             )
+        elif tool in ["signature", "digital_signature"]:
+            advanced_tools.apply_digital_signature(
+                input_paths[0],
+                output_path,
+                signer_name=parameters.get("signerName", "Authorized Signer"),
+                reason=parameters.get("reason", "Document Approval")
+            )
+        elif tool in ["bates", "bates_numbering"]:
+            advanced_tools.apply_bates_numbering(
+                input_paths[0],
+                output_path,
+                prefix=parameters.get("prefix", "BATES"),
+                start_number=parameters.get("startNumber", 1)
+            )
+        elif tool in ["redact", "redaction"]:
+            advanced_tools.redact_sensitive_text(
+                input_paths[0],
+                output_path,
+                keywords=parameters.get("keywords")
+            )
+        elif tool == "compare":
+            if len(input_paths) >= 2:
+                advanced_tools.compare_pdfs(input_paths[0], input_paths[1], output_path)
+            else:
+                advanced_tools.repair_pdf(input_paths[0], output_path)
         else:
             # Default copy
             import shutil
