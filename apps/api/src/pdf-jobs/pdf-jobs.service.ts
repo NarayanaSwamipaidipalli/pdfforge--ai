@@ -113,14 +113,30 @@ export class PdfJobsService {
       throw new BadRequestException(`Processing job is not yet completed (current status: ${job.status})`);
     }
 
-    const ext = job.tool.includes('word') || job.tool.includes('docx') ? 'docx' : 'pdf';
+    const t = job.tool.toLowerCase();
+    let ext = 'pdf';
+    let defaultType = 'application/pdf';
+
+    if (t.includes('word') || t.includes('docx')) {
+      ext = 'docx';
+      defaultType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (t.includes('excel') || t.includes('xlsx') || t.includes('csv')) {
+      ext = 'csv';
+      defaultType = 'text/csv';
+    } else if (t.includes('jpg') || t.includes('images')) {
+      ext = 'png';
+      defaultType = 'image/png';
+    }
+
     const fileName = `pdfforge_${job.tool}_${job.id.substring(0, 8)}.${ext}`;
 
     const { stream, contentType } = await this.filesService.getObjectStream(job.outputFileKey);
+    const resolvedType = contentType && contentType !== 'application/octet-stream' ? contentType : defaultType;
+
     return {
       stream,
       fileName,
-      contentType,
+      contentType: resolvedType,
     };
   }
 

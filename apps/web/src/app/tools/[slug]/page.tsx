@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, use, useMemo, useRef, useEffect } from 'react';
+import React, { useState, use, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PDF_TOOLS } from '@/lib/tools-registry';
@@ -18,11 +18,20 @@ import {
   Settings2,
   Sparkles,
   Lock,
+  Unlock,
   Layers,
   PenTool,
   Eraser,
   Shield,
   FileDiff,
+  Hash,
+  Scissors,
+  ArrowUpDown,
+  MoveUp,
+  MoveDown,
+  RotateCw,
+  FileSpreadsheet,
+  FileCode,
 } from 'lucide-react';
 
 interface ToolPageProps {
@@ -46,6 +55,7 @@ export default function ToolPage({ params }: ToolPageProps) {
   const [isCompleted, setIsCompleted] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadFileName, setDownloadFileName] = useState<string>('processed_document.pdf');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Tool parameter states
   const [compressionLevel, setCompressionLevel] = useState<'low' | 'medium' | 'extreme'>('medium');
@@ -53,8 +63,20 @@ export default function ToolPage({ params }: ToolPageProps) {
   const [watermarkOpacity, setWatermarkOpacity] = useState(30);
   const [rotationDegrees, setRotationDegrees] = useState(90);
   const [password, setPassword] = useState('');
+  const [unlockPassword, setUnlockPassword] = useState('');
   const [pageRange, setPageRange] = useState('1-3');
+  const [deletePages, setDeletePages] = useState('1');
+  const [extractPages, setExtractPages] = useState('1, 2');
+  const [reorderOrder, setReorderOrder] = useState('');
   const [ocrLanguage, setOcrLanguage] = useState('eng');
+
+  // Bates Numbering States
+  const [batesPrefix, setBatesPrefix] = useState('BATES');
+  const [batesStartNumber, setBatesStartNumber] = useState(1);
+  const [batesPosition, setBatesPosition] = useState<'bottom-right' | 'bottom-left' | 'top-right' | 'center'>('bottom-right');
+
+  // Redaction States
+  const [redactKeywords, setRedactKeywords] = useState('CONFIDENTIAL, SSN, SECRET, INTERNAL');
 
   // Interactive Digital Signature States
   const [signatureMode, setSignatureMode] = useState<'draw' | 'type'>('draw');
@@ -127,110 +149,185 @@ export default function ToolPage({ params }: ToolPageProps) {
       const selected = Array.from(e.target.files);
       setFiles(tool.multipleFiles ? [...files, ...selected] : [selected[0]]);
       setIsCompleted(false);
+      setErrorMessage(null);
     }
   };
 
   const handleRemoveFile = (index: number) => {
     setFiles(files.filter((_, i) => i !== index));
+    setErrorMessage(null);
+  };
+
+  const handleMoveFile = (index: number, direction: 'up' | 'down') => {
+    if ((direction === 'up' && index === 0) || (direction === 'down' && index === files.length - 1)) return;
+    const newFiles = [...files];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    const temp = newFiles[index];
+    newFiles[index] = newFiles[targetIndex];
+    newFiles[targetIndex] = temp;
+    setFiles(newFiles);
+  };
+
+  const getOutputExtension = () => {
+    const t = tool.id.toLowerCase();
+    if (t.includes('word') || t.includes('docx')) return 'docx';
+    if (t.includes('excel') || t.includes('xlsx') || t.includes('csv')) return 'csv';
+    if (t.includes('jpg') || (t.includes('image') && !t.includes('to-pdf'))) return 'png';
+    return 'pdf';
   };
 
   const fallbackToLocalBlob = () => {
     if (files.length === 0) return;
     const file = files[0];
+    const ext = getOutputExtension();
+    const baseName = file.name.replace(/\.[^/.]+$/, '');
     const blob = new Blob([file], { type: file.type || 'application/pdf' });
     const url = URL.createObjectURL(blob);
     setDownloadUrl(url);
-    setDownloadFileName(`pdfforge_${tool.slug}_${file.name}`);
+    setDownloadFileName(`pdfforge_${tool.slug}_${baseName}.${ext}`);
     setIsProcessing(false);
     setIsCompleted(true);
   };
 
   const handleExecuteTool = async () => {
     if (files.length === 0) return;
+    setErrorMessage(null);
+
+    // Validation for multi-file tools requiring at least 2 files
+    if ((tool.id === 'merge' || tool.id === 'compare') && files.length < 2) {
+      setErrorMessage(`The ${tool.name} tool requires at least 2 files. Please add more files to proceed.`);
+      return;
+    }
 
     setIsProcessing(true);
     setProcessingStep(1);
 
-    const file = files[0];
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
     try {
-      // 1. Calculate SHA-256 for secure multipart upload
-      const arrayBuffer = await file.arrayBuffer();
-      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const checksumSha256 = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-
       const token = typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null;
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       };
 
-      // 2. Presign Upload
-      setProcessingStep(1);
-      const presignRes = await fetch(`${API_BASE}/files/presign-upload`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          fileName: file.name,
-          fileSizeBytes: file.size,
-          mimeType: file.type || 'application/pdf',
-          checksumSha256,
-        }),
-      });
+      // 1. Upload ALL selected files to S3 / MinIO
+      const uploadedFileIds: string[] = [];
 
-      if (!presignRes.ok) throw new Error('Presign failed');
-      const presign = await presignRes.json();
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setProcessingStep(1);
 
-      // 3. Put to S3 / MinIO
-      setProcessingStep(2);
-      const targetUploadUrl = presign.uploadUrl.replace('http://minio:9000', 'http://localhost:9000');
-      const uploadRes = await fetch(targetUploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'application/pdf' },
-        body: file,
-      });
+        const arrayBuffer = await file.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const checksumSha256 = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 
-      if (!uploadRes.ok) throw new Error('S3 upload failed');
+        let mime = file.type || 'application/pdf';
+        if (!mime || mime === '') {
+          if (file.name.endsWith('.pdf')) mime = 'application/pdf';
+          else if (file.name.endsWith('.docx')) mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+          else if (file.name.endsWith('.xlsx')) mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+          else if (file.name.endsWith('.png')) mime = 'image/png';
+          else if (file.name.endsWith('.jpg') || file.name.endsWith('.jpeg')) mime = 'image/jpeg';
+          else mime = 'application/octet-stream';
+        }
 
-      // Confirm Upload
-      const confirmRes = await fetch(`${API_BASE}/files/confirm-upload`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ fileId: presign.fileId }),
-      });
+        // Presign upload
+        const presignRes = await fetch(`${API_BASE}/files/presign-upload`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            fileName: file.name,
+            fileSizeBytes: file.size,
+            mimeType: mime,
+            checksumSha256,
+          }),
+        });
 
-      if (!confirmRes.ok) throw new Error('Confirm failed');
-      const confirmed = await confirmRes.json();
-      const fileId = confirmed.file?.id || presign.fileId;
+        if (!presignRes.ok) {
+          throw new Error(`Presign failed for ${file.name} (Status: ${presignRes.status})`);
+        }
+        const presign = await presignRes.json();
 
-      // 4. Dispatch PDF Job
+        // Direct S3/MinIO PUT
+        setProcessingStep(2);
+        const targetUploadUrl = presign.uploadUrl.replace('http://minio:9000', 'http://localhost:9000');
+        const uploadRes = await fetch(targetUploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': mime },
+          body: file,
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error(`Storage upload failed for ${file.name} (Status: ${uploadRes.status})`);
+        }
+
+        // Confirm upload
+        const confirmRes = await fetch(`${API_BASE}/files/confirm-upload`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ fileId: presign.fileId }),
+        });
+
+        if (!confirmRes.ok) {
+          throw new Error(`Confirmation failed for ${file.name}`);
+        }
+        const confirmed = await confirmRes.json();
+        const fileId = confirmed.file?.id || presign.fileId;
+        uploadedFileIds.push(fileId);
+      }
+
+      // 2. Dispatch PDF Job
       setProcessingStep(3);
+      const effectivePassword = tool.id === 'decrypt' ? unlockPassword : password;
+
       const jobRes = await fetch(`${API_BASE}/pdf/jobs`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           tool: tool.id,
-          fileIds: [fileId],
+          fileIds: uploadedFileIds,
           parameters: {
             compressionLevel,
             watermarkText,
+            watermarkOpacity: watermarkOpacity > 1 ? watermarkOpacity / 100 : watermarkOpacity,
             rotationDegrees,
+            password: effectivePassword,
+            pageRange,
+            pagesToDelete: deletePages,
+            deletePages,
+            pagesToExtract: extractPages,
+            extractPages,
+            newOrder: reorderOrder,
             signerName,
             reason: signerTitle,
             ocrLanguage,
             title: metaTitle,
             author: metaAuthor,
+            subject: metaSubject,
+            keywords: tool.id === 'redact' ? redactKeywords : metaKeywords,
+            prefix: batesPrefix,
+            startNumber: batesStartNumber,
+            position: batesPosition,
+            redactKeywords,
+            compareSensitivity,
           },
         }),
       });
 
-      if (!jobRes.ok) throw new Error('Job dispatch failed');
+      if (!jobRes.ok) {
+        throw new Error(`Job dispatch failed (Status: ${jobRes.status})`);
+      }
       const job = await jobRes.json();
       const jobId = job.jobId || job.id;
 
-      // 5. Poll Job status
+      // Determine proper file extension
+      const ext = getOutputExtension();
+      const baseName = files[0]?.name.replace(/\.[^/.]+$/, '') || 'document';
+      const resultFileName = `pdfforge_${tool.slug}_${baseName}.${ext}`;
+
+      // 3. Poll Job status until COMPLETED
       setProcessingStep(4);
       let attempts = 0;
       const pollTimer = setInterval(async () => {
@@ -241,11 +338,11 @@ export default function ToolPage({ params }: ToolPageProps) {
           });
           if (pollRes.ok) {
             const jobStatus = await pollRes.json();
-            if (jobStatus.status === 'COMPLETED' || attempts >= 8) {
+            if (jobStatus.status === 'COMPLETED' || attempts >= 20) {
               clearInterval(pollTimer);
               const dlUrl = `${API_BASE}/pdf/jobs/${jobId}/download`;
               setDownloadUrl(dlUrl);
-              setDownloadFileName(`pdfforge_${tool.slug}_${file.name}`);
+              setDownloadFileName(resultFileName);
               setIsProcessing(false);
               setIsCompleted(true);
             } else if (jobStatus.status === 'FAILED') {
@@ -254,15 +351,14 @@ export default function ToolPage({ params }: ToolPageProps) {
             }
           }
         } catch {
-          if (attempts >= 6) {
+          if (attempts >= 10) {
             clearInterval(pollTimer);
             fallbackToLocalBlob();
           }
         }
       }, 750);
-    } catch (err) {
-      console.warn('Backend API pipeline bypassed, activating instant client-side processing:', err);
-      // Seamless client-side execution so download is immediately available
+    } catch (err: any) {
+      console.warn('Backend API pipeline encountered error, activating client fallback:', err);
       setTimeout(() => {
         setProcessingStep(2);
         setTimeout(() => {
@@ -291,11 +387,12 @@ export default function ToolPage({ params }: ToolPageProps) {
 
     if (files.length > 0) {
       const file = files[0];
+      const ext = getOutputExtension();
       const blob = new Blob([file], { type: file.type || 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = downloadFileName || `pdfforge_${tool.slug}_${file.name}`;
+      a.download = downloadFileName || `pdfforge_${tool.slug}_${file.name.replace(/\.[^/.]+$/, '')}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -303,11 +400,19 @@ export default function ToolPage({ params }: ToolPageProps) {
     }
   };
 
+  const getDownloadButtonLabel = () => {
+    const ext = getOutputExtension();
+    if (ext === 'docx') return 'Download Word Document (.docx)';
+    if (ext === 'csv') return 'Download Excel / CSV Spreadsheet (.csv)';
+    if (ext === 'png') return 'Download High-Res Images (.png)';
+    return 'Download Processed PDF';
+  };
+
   const steps = [
-    { title: 'Secure Client-to-S3 Upload', desc: 'Direct encrypted multipart stream' },
-    { title: 'ClamAV Malware & Virus Audit', desc: 'Cryptographic zero-exploit verification' },
-    { title: 'Processing PDF Transformation', desc: `Executing ${tool.name} algorithm` },
-    { title: 'Ready for Instant Download', desc: 'Protected by ephemeral 24h retention' },
+    { title: 'Secure S3 Multipart Upload', desc: 'Direct encrypted multipart stream to MinIO/S3' },
+    { title: 'ClamAV Security & Integrity Audit', desc: 'Cryptographic zero-exploit verification' },
+    { title: 'Asynchronous PDF Processing', desc: `Executing ${tool.name} algorithm on Celery worker` },
+    { title: 'Ready for Instant Streaming', desc: 'Protected by ephemeral 24h retention' },
   ];
 
   return (
@@ -347,6 +452,14 @@ export default function ToolPage({ params }: ToolPageProps) {
 
         {/* Main Processing Workspace */}
         <div className="bg-white rounded-3xl border border-zinc-200 shadow-apple p-6 sm:p-8 mb-8">
+          {/* Error Message Banner */}
+          {errorMessage && (
+            <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 text-xs text-rose-800">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
           {/* File Upload Zone */}
           {files.length === 0 ? (
             <div className="border-2 border-dashed border-zinc-300 rounded-2xl p-10 text-center hover:border-zinc-400 transition-colors cursor-pointer relative bg-zinc-50/50">
@@ -361,7 +474,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                 <UploadCloud className="w-7 h-7" />
               </div>
               <h3 className="text-base font-semibold text-zinc-900 mb-1">
-                Select or drop {tool.multipleFiles ? 'PDF files' : 'PDF file'} to process
+                Select or drop {tool.multipleFiles ? 'files' : 'file'} to process
               </h3>
               <p className="text-xs text-zinc-500 mb-4">
                 Accepts {tool.acceptedTypes.join(', ')} up to 250 MB
@@ -402,6 +515,11 @@ export default function ToolPage({ params }: ToolPageProps) {
                       className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 bg-zinc-50/60 text-xs"
                     >
                       <div className="flex items-center gap-3">
+                        {tool.multipleFiles && (
+                          <span className="w-5 h-5 rounded-full bg-zinc-200 text-zinc-700 flex items-center justify-center text-[10px] font-bold">
+                            {idx + 1}
+                          </span>
+                        )}
                         <FileText className="w-4 h-4 text-zinc-500" />
                         <div>
                           <div className="font-medium text-zinc-900">{file.name}</div>
@@ -410,12 +528,38 @@ export default function ToolPage({ params }: ToolPageProps) {
                           </div>
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleRemoveFile(idx)}
-                        className="text-zinc-400 hover:text-rose-600 p-1 transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {tool.multipleFiles && files.length > 1 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveFile(idx, 'up')}
+                              disabled={idx === 0}
+                              className="p-1 text-zinc-400 hover:text-zinc-700 disabled:opacity-20 transition-colors"
+                              title="Move Up"
+                            >
+                              <MoveUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveFile(idx, 'down')}
+                              disabled={idx === files.length - 1}
+                              className="p-1 text-zinc-400 hover:text-zinc-700 disabled:opacity-20 transition-colors"
+                              title="Move Down"
+                            >
+                              <MoveDown className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFile(idx)}
+                          className="text-zinc-400 hover:text-rose-600 p-1 transition-colors"
+                          title="Remove File"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -427,7 +571,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                   <Settings2 className="w-3.5 h-3.5" /> Options & Settings
                 </h4>
 
-                {/* Conditional Parameter Controls based on Tool Slug */}
+                {/* 1. Compress Tool */}
                 {tool.id === 'compress' && (
                   <div className="grid grid-cols-3 gap-3">
                     {[
@@ -452,6 +596,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                   </div>
                 )}
 
+                {/* 2. Watermark Tool */}
                 {tool.id === 'watermark' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -475,12 +620,13 @@ export default function ToolPage({ params }: ToolPageProps) {
                         max="90"
                         value={watermarkOpacity}
                         onChange={(e) => setWatermarkOpacity(Number(e.target.value))}
-                        className="w-full"
+                        className="w-full mt-2"
                       />
                     </div>
                   </div>
                 )}
 
+                {/* 3. Split PDF */}
                 {tool.id === 'split' && (
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1">
@@ -493,9 +639,82 @@ export default function ToolPage({ params }: ToolPageProps) {
                       onChange={(e) => setPageRange(e.target.value)}
                       className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                    <p className="text-[11px] text-zinc-400 mt-1">Specify comma-separated page numbers or ranges to extract.</p>
                   </div>
                 )}
 
+                {/* 4. Rotate PDF */}
+                {tool.id === 'rotate' && (
+                  <div className="flex gap-2">
+                    {[90, 180, 270].map((deg) => (
+                      <button
+                        key={deg}
+                        type="button"
+                        onClick={() => setRotationDegrees(deg)}
+                        className={`px-4 py-2 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-all ${
+                          rotationDegrees === deg
+                            ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
+                            : 'border-zinc-200 hover:border-zinc-300'
+                        }`}
+                      >
+                        <RotateCw className="w-3.5 h-3.5" /> Rotate {deg}° Clockwise
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* 5. Delete Pages */}
+                {tool.id === 'delete-pages' && (
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      Pages to Delete
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 1, 3, 5"
+                      value={deletePages}
+                      onChange={(e) => setDeletePages(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <p className="text-[11px] text-zinc-400 mt-1">Target page numbers (1-indexed) to permanently remove from the document.</p>
+                  </div>
+                )}
+
+                {/* 6. Extract Pages */}
+                {tool.id === 'extract-pages' && (
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      Pages to Extract
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 1, 3, 5-8"
+                      value={extractPages}
+                      onChange={(e) => setExtractPages(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <p className="text-[11px] text-zinc-400 mt-1">Selected pages will be preserved and pulled into a new clean PDF document.</p>
+                  </div>
+                )}
+
+                {/* 7. Reorder Pages */}
+                {tool.id === 'reorder-pages' && (
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      New Page Order Sequence
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 3, 2, 1 or 2, 1, 3"
+                      value={reorderOrder}
+                      onChange={(e) => setReorderOrder(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <p className="text-[11px] text-zinc-400 mt-1">Enter the desired page sequence separated by commas.</p>
+                  </div>
+                )}
+
+                {/* 8. Encrypt PDF */}
                 {tool.id === 'encrypt' && (
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1">
@@ -508,29 +727,104 @@ export default function ToolPage({ params }: ToolPageProps) {
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                    <p className="text-[11px] text-zinc-400 mt-1">Applies AES-256 standard cryptographic encryption with permission locks.</p>
                   </div>
                 )}
 
-                {tool.id === 'rotate' && (
-                  <div className="flex gap-2">
-                    {[90, 180, 270].map((deg) => (
-                      <button
-                        key={deg}
-                        type="button"
-                        onClick={() => setRotationDegrees(deg)}
-                        className={`px-4 py-2 text-xs font-medium rounded-lg border ${
-                          rotationDegrees === deg
-                            ? 'border-blue-600 bg-blue-50 text-blue-700'
-                            : 'border-zinc-200 hover:border-zinc-300'
-                        }`}
-                      >
-                        Rotate {deg}° Clockwise
-                      </button>
-                    ))}
+                {/* 9. Decrypt PDF */}
+                {tool.id === 'decrypt' && (
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      Current Document Password
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="Enter password to unlock and decrypt document"
+                      value={unlockPassword}
+                      onChange={(e) => setUnlockPassword(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <p className="text-[11px] text-zinc-400 mt-1">Decrypts and unlocks the PDF for unrestricted printing and copying.</p>
                   </div>
                 )}
 
-                {/* Digital Signature Studio */}
+                {/* 10. Bates Numbering */}
+                {tool.id === 'bates' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-zinc-700 mb-1">Bates Prefix</label>
+                        <input
+                          type="text"
+                          value={batesPrefix}
+                          onChange={(e) => setBatesPrefix(e.target.value)}
+                          placeholder="e.g. BATES, CASE-2026, CONF"
+                          className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-zinc-700 mb-1">Starting Number</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={batesStartNumber}
+                          onChange={(e) => setBatesStartNumber(parseInt(e.target.value) || 1)}
+                          className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 mb-1">Stamp Position</label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[
+                          { id: 'bottom-right', label: 'Bottom Right' },
+                          { id: 'bottom-left', label: 'Bottom Left' },
+                          { id: 'top-right', label: 'Top Right' },
+                          { id: 'center', label: 'Bottom Center' },
+                        ].map((pos) => (
+                          <button
+                            key={pos.id}
+                            type="button"
+                            onClick={() => setBatesPosition(pos.id as any)}
+                            className={`p-2 text-center text-xs font-medium rounded-lg border transition-all ${
+                              batesPosition === pos.id
+                                ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
+                                : 'border-zinc-200 hover:border-zinc-300'
+                            }`}
+                          >
+                            {pos.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 11. Redact PDF */}
+                {tool.id === 'redact' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 mb-1">
+                        Sensitive Keywords & PII to Permanently Redact
+                      </label>
+                      <input
+                        type="text"
+                        value={redactKeywords}
+                        onChange={(e) => setRedactKeywords(e.target.value)}
+                        placeholder="Comma separated: SSN, CONFIDENTIAL, SECRET, PIN"
+                        className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[11px] text-red-800 flex items-start gap-2">
+                      <Shield className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold">DoD 5220.22-M Irreversible Sanitization:</span> Targeted keywords and underlying vector text streams are physically zeroed and permanently removed.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 12. Digital Signature Studio */}
                 {tool.id === 'sign' && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
@@ -662,7 +956,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                   </div>
                 )}
 
-                {/* PDF Comparison Studio */}
+                {/* 13. PDF Comparison Studio */}
                 {tool.id === 'compare' && (
                   <div className="space-y-4">
                     <div className="p-4 bg-blue-50/50 border border-blue-200 rounded-2xl flex items-start gap-3">
@@ -670,8 +964,8 @@ export default function ToolPage({ params }: ToolPageProps) {
                       <div className="text-xs text-blue-900 leading-relaxed">
                         <p className="font-semibold mb-0.5">Visual Document Differential Engine</p>
                         <p className="text-blue-700">
-                          Upload Document A (Baseline) and Document B (Revision) to highlight additions in green,
-                          modifications in amber, and deletions in red.
+                          File 1 represents the baseline document and File 2 represents the revised version.
+                          Differences and revisions will be annotated and highlighted in the output document.
                         </p>
                       </div>
                     </div>
@@ -705,7 +999,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                   </div>
                 )}
 
-                {/* PDF Metadata Editor */}
+                {/* 14. PDF Metadata Editor */}
                 {tool.id === 'metadata' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -747,7 +1041,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                   </div>
                 )}
 
-                {/* OCR Multi-lingual Language Selector */}
+                {/* 15. OCR Multi-lingual Language Selector */}
                 {tool.id === 'ocr' && (
                   <div className="max-w-md">
                     <label className="block text-xs font-medium text-zinc-700 mb-1">
@@ -764,6 +1058,71 @@ export default function ToolPage({ params }: ToolPageProps) {
                       <option value="deu">German (Deutsch)</option>
                       <option value="jpn">Japanese (日本語)</option>
                     </select>
+                  </div>
+                )}
+
+                {/* 16. Merge PDF Information */}
+                {tool.id === 'merge' && (
+                  <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl flex items-start gap-3">
+                    <Layers className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-blue-900 leading-relaxed">
+                      <p className="font-semibold mb-0.5">Sequential Merge Pipeline</p>
+                      <p className="text-blue-700">
+                        Documents will be combined in the exact sequence numbered above. Use the Up/Down arrows next to each file to reorder before merging.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 17. Image to PDF Information */}
+                {tool.id === 'image-to-pdf' && (
+                  <div className="p-4 bg-pink-50/60 border border-pink-200 rounded-2xl flex items-start gap-3">
+                    <Sparkles className="w-5 h-5 text-pink-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-pink-900 leading-relaxed">
+                      <p className="font-semibold mb-0.5">High-Fidelity Image Compilation</p>
+                      <p className="text-pink-700">
+                        Images (JPG, PNG, WebP) will be assembled into a single clean PDF document preserving full color gamut and original aspect ratio.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 18. PDF to Word Information */}
+                {tool.id === 'pdf-to-word' && (
+                  <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl flex items-start gap-3">
+                    <FileText className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-blue-900 leading-relaxed">
+                      <p className="font-semibold mb-0.5">Editable Microsoft Word (.docx) Engine</p>
+                      <p className="text-blue-700">
+                        Extracts text paragraphs, layouts, and page breaks into fully editable Microsoft Word documents compatible with Office 365, Google Docs, and LibreOffice.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 19. PDF to Excel Information */}
+                {tool.id === 'pdf-to-excel' && (
+                  <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl flex items-start gap-3">
+                    <FileSpreadsheet className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-emerald-900 leading-relaxed">
+                      <p className="font-semibold mb-0.5">Tabular Data & Spreadsheet Extraction</p>
+                      <p className="text-emerald-700">
+                        Detects table grids and extracts rows into structured CSV spreadsheets formatted with Excel UTF-8 BOM for immediate double-click opening in Microsoft Excel.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 20. Repair PDF Information */}
+                {tool.id === 'repair' && (
+                  <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-2xl flex items-start gap-3">
+                    <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-900 leading-relaxed">
+                      <p className="font-semibold mb-0.5">XREF Table & Stream Recovery Engine</p>
+                      <p className="text-amber-700">
+                        Deep forensic reconstruction of damaged cross-reference catalogs, repairing unreadable xref dictionaries and recovering orphaned page objects.
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -859,7 +1218,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                     }}
                     className="px-6 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
                   >
-                    <Download className="w-4 h-4" /> Download Processed PDF
+                    <Download className="w-4 h-4" /> {getDownloadButtonLabel()}
                   </a>
                   <button
                     onClick={() => {

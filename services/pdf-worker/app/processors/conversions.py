@@ -73,6 +73,39 @@ def pdf_to_word(input_path: str, output_path: str) -> str:
         doc.close()
     return output_path
 
+def pdf_to_excel(input_path: str, output_path: str) -> str:
+    """Extracts tables and tabular numerical data from PDF into CSV/Excel format."""
+    import csv
+    doc = fitz.open(input_path)
+    all_rows = []
+    
+    for page_idx, page in enumerate(doc):
+        tabs = page.find_tables()
+        if tabs.tables:
+            for t_idx, tab in enumerate(tabs):
+                all_rows.append([f"--- Page {page_idx + 1} Table {t_idx + 1} ---"])
+                for row in tab.extract():
+                    all_rows.append(row)
+                all_rows.append([])
+        else:
+            lines = page.get_text().split("\n")
+            all_rows.append([f"--- Page {page_idx + 1} Tabular Data ---"])
+            for line in lines:
+                parts = line.strip().split()
+                if parts:
+                    all_rows.append(parts)
+            all_rows.append([])
+            
+    doc.close()
+    
+    # Write as CSV with Excel UTF-8 BOM so Microsoft Excel opens directly
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        for r in all_rows:
+            writer.writerow(r)
+            
+    return output_path
+
 def office_to_pdf(input_path: str, output_dir: str) -> str:
     """
     Invokes LibreOffice headless daemon to convert DOCX, XLSX, PPTX to PDF.

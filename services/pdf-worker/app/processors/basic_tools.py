@@ -121,15 +121,26 @@ def add_watermark(
         center_x = rect.width / 2
         center_y = rect.height / 2
         
-        # PyMuPDF insert_text or font styling
-        page.insert_text(
-            fitz.Point(center_x - (len(text) * font_size * 0.25), center_y),
-            text,
-            fontsize=font_size,
-            rotate=rotation,
-            color=(0.7, 0.7, 0.7),
-            fill_opacity=opacity
-        )
+        # PyMuPDF insert_text with arbitrary angle support
+        pt = fitz.Point(center_x - (len(text) * font_size * 0.25), center_y)
+        if rotation in (0, 90, 180, 270):
+            page.insert_text(
+                pt,
+                text,
+                fontsize=font_size,
+                rotate=rotation,
+                color=(0.7, 0.7, 0.7),
+                fill_opacity=opacity
+            )
+        else:
+            page.insert_text(
+                pt,
+                text,
+                fontsize=font_size,
+                morph=(pt, fitz.Matrix(rotation)),
+                color=(0.7, 0.7, 0.7),
+                fill_opacity=opacity
+            )
         
     doc.save(output_path, garbage=3, deflate=True)
     doc.close()

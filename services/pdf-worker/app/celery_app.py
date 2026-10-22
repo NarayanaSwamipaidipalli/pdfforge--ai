@@ -68,74 +68,118 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
         output_file_name = f"result_{job_id}.pdf"
         output_path = os.path.join(work_dir, output_file_name)
         
-        # Route tool operation
-        if tool == "merge":
+        # Route tool operation with comprehensive slug and ID mapping
+        t = str(tool).lower().replace("_", "-")
+        
+        if t in ["merge", "merge-pdf"]:
             basic_tools.merge_pdfs(input_paths, output_path)
-        elif tool == "split":
-            basic_tools.split_pdf(input_paths[0], output_path, parameters.get("pages"))
-        elif tool == "compress":
+        elif t in ["split", "split-pdf"]:
+            pages = parameters.get("pages")
+            if not pages and parameters.get("pageRange"):
+                try:
+                    pages = []
+                    for part in str(parameters.get("pageRange")).split(","):
+                        if "-" in part:
+                            start, end = part.split("-")
+                            pages.extend(range(int(start.strip()) - 1, int(end.strip())))
+                        else:
+                            pages.append(int(part.strip()) - 1)
+                except Exception:
+                    pages = None
+            basic_tools.split_pdf(input_paths[0], output_path, pages)
+        elif t in ["compress", "compress-pdf"]:
             basic_tools.compress_pdf(input_paths[0], output_path, parameters.get("compressionLevel", "medium"))
-        elif tool == "rotate":
-            basic_tools.rotate_pdf(input_paths[0], output_path, parameters.get("rotationDegrees", 90))
-        elif tool in ["delete_pages", "delete"]:
-            basic_tools.delete_pages(input_paths[0], output_path, parameters.get("pagesToDelete", []))
-        elif tool in ["extract_pages", "extract"]:
-            basic_tools.extract_pages(input_paths[0], output_path, parameters.get("pagesToExtract", []))
-        elif tool in ["reorder", "reorder_pages"]:
+        elif t in ["rotate", "rotate-pdf"]:
+            basic_tools.rotate_pdf(input_paths[0], output_path, int(parameters.get("rotationDegrees", 90)))
+        elif t in ["delete-pages", "delete_pages", "delete"]:
+            pages_to_del = parameters.get("pagesToDelete", [])
+            if not pages_to_del and parameters.get("deletePages"):
+                try:
+                    pages_to_del = [int(p.strip()) - 1 for p in str(parameters.get("deletePages")).split(",") if p.strip()]
+                except Exception:
+                    pages_to_del = []
+            basic_tools.delete_pages(input_paths[0], output_path, pages_to_del)
+        elif t in ["extract-pages", "extract_pages", "extract"]:
+            pages_to_ext = parameters.get("pagesToExtract", [])
+            if not pages_to_ext and parameters.get("extractPages"):
+                try:
+                    pages_to_ext = [int(p.strip()) - 1 for p in str(parameters.get("extractPages")).split(",") if p.strip()]
+                except Exception:
+                    pages_to_ext = []
+            basic_tools.extract_pages(input_paths[0], output_path, pages_to_ext)
+        elif t in ["reorder", "reorder-pages", "reorder_pages"]:
             basic_tools.reorder_pages(input_paths[0], output_path, parameters.get("newOrder", []))
-        elif tool == "watermark":
+        elif t in ["watermark", "pdf-watermark"]:
+            opacity = float(parameters.get("watermarkOpacity", 0.3))
+            if opacity > 1.0:
+                opacity = opacity / 100.0
             basic_tools.add_watermark(
                 input_paths[0],
                 output_path,
                 text=parameters.get("watermarkText", "CONFIDENTIAL"),
-                opacity=parameters.get("watermarkOpacity", 0.3)
+                opacity=opacity
             )
-        elif tool == "encrypt":
-            basic_tools.encrypt_pdf(input_paths[0], output_path, parameters.get("password", "123456"))
-        elif tool == "decrypt":
-            basic_tools.decrypt_pdf(input_paths[0], output_path, parameters.get("password", ""))
-        elif tool in ["pdf_to_images", "pdf_to_jpg"]:
+        elif t in ["encrypt", "protect", "protect-pdf", "pdf-encryption"]:
+            basic_tools.encrypt_pdf(input_paths[0], output_path, str(parameters.get("password", "123456")))
+        elif t in ["decrypt", "unlock", "unlock-pdf", "pdf-password-removal"]:
+            basic_tools.decrypt_pdf(input_paths[0], output_path, str(parameters.get("password", "")))
+        elif t in ["pdf-to-images", "pdf_to_images", "pdf-to-jpg", "pdf_to_jpg"]:
             img_files = conversions.pdf_to_images(input_paths[0], work_dir)
             output_file_name = os.path.basename(img_files[0]) if img_files else "pages.png"
             output_path = img_files[0] if img_files else output_path
-        elif tool in ["images_to_pdf", "jpg_to_pdf"]:
+        elif t in ["images-to-pdf", "images_to_pdf", "image-to-pdf", "jpg-to-pdf", "jpg_to_pdf"]:
             conversions.images_to_pdf(input_paths, output_path)
-        elif tool in ["pdf_to_word", "pdf_to_docx"]:
+        elif t in ["pdf-to-word", "pdf_to_word", "pdf-to-docx"]:
             output_file_name = f"result_{job_id}.docx"
             output_path = os.path.join(work_dir, output_file_name)
             conversions.pdf_to_word(input_paths[0], output_path)
-        elif tool == "ocr":
+        elif t in ["pdf-to-excel", "pdf_to_excel", "pdf-to-xlsx", "pdf-to-csv"]:
+            output_file_name = f"result_{job_id}.csv"
+            output_path = os.path.join(work_dir, output_file_name)
+            conversions.pdf_to_excel(input_paths[0], output_path)
+        elif t in ["word-to-pdf", "excel-to-pdf", "ppt-to-pdf", "office-to-pdf"]:
+            res = conversions.office_to_pdf(input_paths[0], work_dir)
+            if res and os.path.exists(res):
+                output_path = res
+                output_file_name = os.path.basename(res)
+        elif t in ["ocr", "ocr-pdf"]:
             advanced_tools.ocr_pdf(input_paths[0], output_path, parameters.get("ocrLanguage", "eng"))
-        elif tool == "repair":
+        elif t in ["repair", "repair-pdf"]:
             advanced_tools.repair_pdf(input_paths[0], output_path)
-        elif tool == "metadata":
+        elif t in ["metadata", "pdf-metadata-editor"]:
             advanced_tools.edit_metadata(
                 input_paths[0],
                 output_path,
                 title=parameters.get("title"),
-                author=parameters.get("author")
+                author=parameters.get("author"),
+                subject=parameters.get("subject"),
+                keywords=parameters.get("keywords")
             )
-        elif tool in ["signature", "digital_signature"]:
+        elif t in ["sign", "signature", "digital-signatures", "digital_signature"]:
             advanced_tools.apply_digital_signature(
                 input_paths[0],
                 output_path,
                 signer_name=parameters.get("signerName", "Authorized Signer"),
-                reason=parameters.get("reason", "Document Approval")
+                reason=parameters.get("reason", "Document Approval & Verification")
             )
-        elif tool in ["bates", "bates_numbering"]:
+        elif t in ["bates", "bates-numbering", "bates_numbering"]:
             advanced_tools.apply_bates_numbering(
                 input_paths[0],
                 output_path,
                 prefix=parameters.get("prefix", "BATES"),
-                start_number=parameters.get("startNumber", 1)
+                start_number=int(parameters.get("startNumber", 1)),
+                position=parameters.get("position", "bottom-right")
             )
-        elif tool in ["redact", "redaction"]:
+        elif t in ["redact", "redaction", "redact-pdf"]:
+            kw = parameters.get("keywords")
+            if isinstance(kw, str):
+                kw = [k.strip() for k in kw.split(",") if k.strip()]
             advanced_tools.redact_sensitive_text(
                 input_paths[0],
                 output_path,
-                keywords=parameters.get("keywords")
+                keywords=kw
             )
-        elif tool == "compare":
+        elif t in ["compare", "compare-pdf", "pdf-comparison"]:
             if len(input_paths) >= 2:
                 advanced_tools.compare_pdfs(input_paths[0], input_paths[1], output_path)
             else:
@@ -151,7 +195,15 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
 
         # Upload output file to S3/MinIO
         try:
-            content_type = "application/pdf" if output_file_name.endswith(".pdf") else "application/octet-stream"
+            mime_map = {
+                ".pdf": "application/pdf",
+                ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".csv": "text/csv",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+            }
+            _, out_ext = os.path.splitext(output_file_name.lower())
+            content_type = mime_map.get(out_ext, "application/pdf")
             s3.upload_file(
                 output_path,
                 settings.S3_BUCKET_NAME,
