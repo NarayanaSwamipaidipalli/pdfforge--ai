@@ -119,7 +119,26 @@ async function main() {
   log('📦', 'Stage 3: S3 Direct Multipart Upload & Storage Plane');
   await runTest('Direct Upload Simulation & Lifecycle Confirmation', async () => {
     // 1. Presign
-    const mockPdfBytes = Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF');
+    const mockPdfBytes = Buffer.from(
+      '%PDF-1.4\n' +
+      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n' +
+      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n' +
+      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n' +
+      '4 0 obj << /Length 20 >> stream\n' +
+      'BT /F1 12 Tf ET\n' +
+      'endstream endobj\n' +
+      'xref\n' +
+      '0 5\n' +
+      '0000000000 65535 f \n' +
+      '0000000009 00000 n \n' +
+      '0000000058 00000 n \n' +
+      '0000000115 00000 n \n' +
+      '0000000206 00000 n \n' +
+      'trailer << /Size 5 /Root 1 0 R >>\n' +
+      'startxref\n' +
+      '278\n' +
+      '%%EOF'
+    );
     const checksumSha256 = crypto.createHash('sha256').update(mockPdfBytes).digest('hex');
 
     const presignRes = await fetch(`${API_BASE}/files/presign-upload`, {
@@ -210,6 +229,28 @@ async function main() {
     if (!['QUEUED', 'PROCESSING', 'COMPLETED'].includes(job.status)) {
       throw new Error(`Unexpected job status: ${job.status}`);
     }
+  });
+
+  await runTest('Stream and Download Processed PDF File', async () => {
+    for (let i = 0; i < 15; i++) {
+      const res = await fetch(`${API_BASE}/pdf/jobs/${ctx.jobId}`, {
+        headers: { Authorization: `Bearer ${ctx.token}` },
+      });
+      const job = await res.json() as any;
+      if (job.status === 'COMPLETED') break;
+      await new Promise(r => setTimeout(r, 600));
+    }
+
+    const dlRes = await fetch(`${API_BASE}/pdf/jobs/${ctx.jobId}/download`);
+    if (!dlRes.ok) throw new Error(`Download failed with status ${dlRes.status}`);
+    const contentType = dlRes.headers.get('content-type');
+    if (!contentType?.includes('application/pdf')) {
+      throw new Error(`Expected application/pdf, received ${contentType}`);
+    }
+    const buf = await dlRes.arrayBuffer();
+    if (buf.byteLength < 100) throw new Error('Downloaded buffer too small');
+    const header = Buffer.from(buf).subarray(0, 5).toString();
+    if (header !== '%PDF-') throw new Error(`Invalid PDF header: ${header}`);
   });
 
   // 5. AI Document Intelligence

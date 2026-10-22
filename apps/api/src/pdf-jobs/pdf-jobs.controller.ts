@@ -1,5 +1,6 @@
-import { Controller, Post, Body, Get, Param, UseGuards, Optional } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, UseGuards, Optional, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Response } from 'express';
 import { PdfJobsService } from './pdf-jobs.service';
 import { CreatePdfJobDto, WorkerCallbackDto } from './dto/job.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -23,6 +24,15 @@ export class PdfJobsController {
   @ApiOperation({ summary: 'Query job status, progress percentage, and output download link' })
   async getJobStatus(@Param('id') id: string) {
     return this.pdfJobsService.getJobStatus(id);
+  }
+
+  @Get(':id/download')
+  @ApiOperation({ summary: 'Stream and download processed output file for a job' })
+  async downloadJobOutput(@Param('id') id: string, @Res() res: Response) {
+    const { stream, fileName, contentType } = await this.pdfJobsService.getJobOutputStream(id);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    (stream as any).pipe(res);
   }
 
   @Post('callback')

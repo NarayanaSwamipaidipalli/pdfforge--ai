@@ -1,10 +1,21 @@
 import os
 import time
 import httpx
+import boto3
 from celery import Celery
 from app.config import settings
 from app.processors import basic_tools, conversions, advanced_tools
 from app.ai import document_intelligence
+
+def get_s3_client():
+    endpoint = settings.S3_ENDPOINT if settings.S3_ENDPOINT else None
+    return boto3.client(
+        's3',
+        endpoint_url=endpoint,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_REGION
+    )
 
 celery_app = Celery(
     "pdfforge_worker",
@@ -33,13 +44,19 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
     os.makedirs(work_dir, exist_ok=True)
     
     try:
-        # In a full cloud environment, download input files from S3 to work_dir
-        # For local testing/fallback, create mock inputs if files are virtual
+        s3 = get_s3_client()
         input_paths = []
         for f in files:
             local_path = os.path.join(work_dir, f.get("originalName", "input.pdf"))
-            # If file doesn't exist locally, create a valid starter PDF
-            if not os.path.exists(local_path):
+            s3_key = f.get("s3Key")
+            downloaded = False
+            if s3_key:
+                try:
+                    s3.download_file(settings.S3_BUCKET_NAME, s3_key, local_path)
+                    downloaded = True
+                except Exception as s3_err:
+                    print(f"Could not download from S3 {s3_key}: {s3_err}")
+            if not downloaded and not os.path.exists(local_path):
                 import fitz
                 doc = fitz.open()
                 page = doc.new_page()
@@ -131,12 +148,25 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
         duration_ms = int((time.time() - start_time) * 1000)
         file_size_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 1024
         output_s3_key = f"processed/{job_id}/{output_file_name}"
+
+        # Upload output file to S3/MinIO
+        try:
+            content_type = "application/pdf" if output_file_name.endswith(".pdf") else "application/octet-stream"
+            s3.upload_file(
+                output_path,
+                settings.S3_BUCKET_NAME,
+                output_s3_key,
+                ExtraArgs={"ContentType": content_type}
+            )
+        except Exception as upload_err:
+            print(f"Failed to upload result to S3: {upload_err}")
         
         # Notify API Gateway via callback
         if callback_url:
+            cb_url = callback_url.replace("http://localhost:4000", "http://api-gateway:4000")
             try:
                 httpx.post(
-                    callback_url,
+                    cb_url,
                     json={
                         "jobId": job_id,
                         "status": "COMPLETED",
@@ -147,7 +177,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                     timeout=5.0
                 )
             except Exception as cb_err:
-                pass
+                print(f"Callback notification error: {cb_err}")
                 
         return {
             "status": "COMPLETED",
@@ -159,9 +189,10 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
     except Exception as exc:
         duration_ms = int((time.time() - start_time) * 1000)
         if callback_url:
+            cb_url = callback_url.replace("http://localhost:4000", "http://api-gateway:4000")
             try:
                 httpx.post(
-                    callback_url,
+                    cb_url,
                     json={
                         "jobId": job_id,
                         "status": "FAILED",

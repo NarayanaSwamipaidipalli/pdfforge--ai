@@ -135,6 +135,19 @@ export class FilesService {
     };
   }
 
+  async getObjectStream(storedKey: string) {
+    const command = new GetObjectCommand({
+      Bucket: this.bucketName,
+      Key: storedKey,
+    });
+    const response = await this.s3Client.send(command);
+    return {
+      stream: response.Body,
+      contentType: response.ContentType || 'application/pdf',
+      contentLength: response.ContentLength,
+    };
+  }
+
   async deleteFile(fileId: string) {
     const file = await this.prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!file) return;

@@ -100,6 +100,30 @@ export class PdfJobsService {
     };
   }
 
+  async getJobOutputStream(jobId: string) {
+    const job = await this.prisma.processingJob.findUnique({
+      where: { id: jobId },
+    });
+
+    if (!job) {
+      throw new NotFoundException(`Processing job ${jobId} not found`);
+    }
+
+    if (job.status !== 'COMPLETED' || !job.outputFileKey) {
+      throw new BadRequestException(`Processing job is not yet completed (current status: ${job.status})`);
+    }
+
+    const ext = job.tool.includes('word') || job.tool.includes('docx') ? 'docx' : 'pdf';
+    const fileName = `pdfforge_${job.tool}_${job.id.substring(0, 8)}.${ext}`;
+
+    const { stream, contentType } = await this.filesService.getObjectStream(job.outputFileKey);
+    return {
+      stream,
+      fileName,
+      contentType,
+    };
+  }
+
   async handleWorkerCallback(callbackDto: WorkerCallbackDto) {
     const job = await this.prisma.processingJob.findUnique({
       where: { id: callbackDto.jobId },
