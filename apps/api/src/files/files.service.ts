@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 export class FilesService {
   private readonly logger = new Logger(FilesService.name);
   private readonly s3Client: S3Client;
+  private readonly presignS3Client: S3Client;
   private readonly bucketName: string;
 
   constructor(
@@ -27,6 +28,21 @@ export class FilesService {
       region,
       endpoint: endpoint ? endpoint : undefined,
       forcePathStyle: !!endpoint,
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
+    });
+
+    const publicEndpoint = this.configService.get<string>(
+      'S3_PUBLIC_ENDPOINT',
+      endpoint && endpoint.includes('minio:9000') ? 'http://localhost:9000' : (endpoint || undefined),
+    );
+
+    this.presignS3Client = new S3Client({
+      region,
+      endpoint: publicEndpoint,
+      forcePathStyle: !!publicEndpoint,
       credentials: {
         accessKeyId,
         secretAccessKey,
@@ -86,7 +102,7 @@ export class FilesService {
       },
     });
 
-    const uploadUrl = await getSignedUrl(this.s3Client, command, { expiresIn: 900 });
+    const uploadUrl = await getSignedUrl(this.presignS3Client, command, { expiresIn: 900 });
 
     return {
       fileId: fileRecord.id,
@@ -126,7 +142,7 @@ export class FilesService {
       ResponseContentDisposition: `attachment; filename="${encodeURIComponent(file.originalName)}"`,
     });
 
-    const downloadUrl = await getSignedUrl(this.s3Client, command, { expiresIn: ttlSeconds });
+    const downloadUrl = await getSignedUrl(this.presignS3Client, command, { expiresIn: ttlSeconds });
     return {
       downloadUrl,
       fileName: file.originalName,

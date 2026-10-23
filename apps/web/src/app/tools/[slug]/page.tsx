@@ -151,6 +151,7 @@ export default function ToolPage({ params }: ToolPageProps) {
       setIsCompleted(false);
       setErrorMessage(null);
     }
+    e.target.value = '';
   };
 
   const handleRemoveFile = (index: number) => {
@@ -193,9 +194,9 @@ export default function ToolPage({ params }: ToolPageProps) {
     if (files.length === 0) return;
     setErrorMessage(null);
 
-    // Validation for multi-file tools requiring at least 2 files
-    if ((tool.id === 'merge' || tool.id === 'compare') && files.length < 2) {
-      setErrorMessage(`The ${tool.name} tool requires at least 2 files. Please add more files to proceed.`);
+    // Validation for tools strictly requiring multiple revisions (e.g. Compare)
+    if (tool.id === 'compare' && files.length < 2) {
+      setErrorMessage(`The ${tool.name} tool requires at least 2 document revisions (Baseline vs. Revision) to generate a diff.`);
       return;
     }
 
@@ -374,8 +375,29 @@ export default function ToolPage({ params }: ToolPageProps) {
     }
   };
 
-  const handleTriggerDownload = () => {
+  const handleTriggerDownload = async () => {
     if (downloadUrl && !downloadUrl.startsWith('#')) {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null;
+        const res = await fetch(downloadUrl, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = downloadFileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+          return;
+        }
+      } catch (err) {
+        console.warn('Direct stream fetch failed, falling back to window download:', err);
+      }
+
       const a = document.createElement('a');
       a.href = downloadUrl;
       a.download = downloadFileName;
@@ -563,6 +585,20 @@ export default function ToolPage({ params }: ToolPageProps) {
                     </div>
                   ))}
                 </div>
+
+                {tool.multipleFiles && (
+                  <label className="mt-3 flex items-center justify-center gap-2 p-3 border border-dashed border-zinc-300 rounded-xl bg-zinc-50/50 hover:bg-zinc-100/50 hover:border-zinc-400 cursor-pointer transition-colors text-xs text-zinc-600">
+                    <UploadCloud className="w-4 h-4 text-zinc-500" />
+                    <span>+ Add more files (click to browse or drop files)</span>
+                    <input
+                      type="file"
+                      multiple
+                      accept={tool.acceptedTypes.join(',')}
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                )}
               </div>
 
               {/* Tool Parameters Configuration */}
@@ -1205,21 +1241,13 @@ export default function ToolPage({ params }: ToolPageProps) {
                 </p>
 
                 <div className="flex flex-wrap justify-center gap-3">
-                  <a
-                    href={downloadUrl || '#'}
-                    download={downloadFileName}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => {
-                      if (!downloadUrl || downloadUrl.startsWith('#')) {
-                        e.preventDefault();
-                        handleTriggerDownload();
-                      }
-                    }}
+                  <button
+                    type="button"
+                    onClick={handleTriggerDownload}
                     className="px-6 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
                   >
                     <Download className="w-4 h-4" /> {getDownloadButtonLabel()}
-                  </a>
+                  </button>
                   <button
                     onClick={() => {
                       setFiles([]);

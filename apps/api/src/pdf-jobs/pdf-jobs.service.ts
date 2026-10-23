@@ -28,6 +28,10 @@ export class PdfJobsService {
       throw new BadRequestException('One or more referenced files do not exist or have expired');
     }
 
+    // Preserve exact user-defined file ordering
+    const fileMap = new Map(files.map((f) => [f.id, f]));
+    const orderedFiles = dto.fileIds.map((id) => fileMap.get(id)).filter(Boolean) as typeof files;
+
     // 2. Check user daily conversion limits if on FREE tier
     if (userId) {
       const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -44,7 +48,7 @@ export class PdfJobsService {
         orgId: orgId || null,
         status: 'QUEUED',
         priority: 'NORMAL',
-        inputFilesPayload: files.map((f) => ({
+        inputFilesPayload: orderedFiles.map((f) => ({
           fileId: f.id,
           name: f.originalName,
           key: f.storedKey,
@@ -55,7 +59,7 @@ export class PdfJobsService {
     });
 
     // 4. Dispatch job to Python processing worker asynchronously
-    this.dispatchToWorker(job.id, dto.tool, files, dto.parameters || {}).catch((err) => {
+    this.dispatchToWorker(job.id, dto.tool, orderedFiles, dto.parameters || {}).catch((err) => {
       this.logger.error(`Error dispatching job ${job.id} to worker: ${err.message}`);
     });
 

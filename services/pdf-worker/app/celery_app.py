@@ -46,8 +46,11 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
     try:
         s3 = get_s3_client()
         input_paths = []
-        for f in files:
-            local_path = os.path.join(work_dir, f.get("originalName", "input.pdf"))
+        for idx, f in enumerate(files):
+            file_id_clean = str(f.get("id", idx))[:8]
+            orig_name = f.get("originalName", f"doc_{idx}.pdf")
+            local_filename = f"{idx}_{file_id_clean}_{orig_name}"
+            local_path = os.path.join(work_dir, local_filename)
             s3_key = f.get("s3Key")
             downloaded = False
             if s3_key:
@@ -60,7 +63,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 import fitz
                 doc = fitz.open()
                 page = doc.new_page()
-                page.insert_text(fitz.Point(72, 72), f"PDFForge AI: {f.get('originalName', 'Doc')}", fontsize=20)
+                page.insert_text(fitz.Point(72, 72), f"PDFForge AI: {orig_name}", fontsize=20)
                 doc.save(local_path)
                 doc.close()
             input_paths.append(local_path)
