@@ -27,8 +27,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Python
+services/pdf-worker/lib/
+services/pdf-worker/lib64/
+!**/src/lib/**
 parts/
 sdist/
 var/
