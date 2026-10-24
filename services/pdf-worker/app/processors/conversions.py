@@ -1,7 +1,7 @@
 import os
 import csv
 import subprocess
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import fitz
 from PIL import Image
 
@@ -56,59 +56,10 @@ def images_to_pdf(image_paths: List[str], output_path: str) -> str:
     result_doc.close()
     return output_path
 
-def pdf_to_word(input_path: str, output_path: str) -> str:
+def pdf_to_word(input_path: str, output_path: str, options: Optional[Dict[str, Any]] = None) -> str:
     """Converts PDF document to editable Microsoft Word .docx format with layout formatting."""
-    try:
-        from docx import Document
-        from docx.shared import Inches, Pt, RGBColor
-        doc = Document()
-        pdf = fitz.open(input_path)
-        
-        for i, page in enumerate(pdf):
-            if i > 0:
-                doc.add_page_break()
-                
-            # Extract structured blocks
-            blocks = page.get_text("blocks")
-            for b in blocks:
-                text = b[4].strip()
-                if not text:
-                    continue
-                # Heuristic: large text or short uppercase lines as headings
-                lines = text.split("\n")
-                if len(lines) == 1 and len(text) < 60 and (text.isupper() or b[3] - b[1] > 20):
-                    doc.add_heading(text, level=2)
-                else:
-                    p = doc.add_paragraph()
-                    p.add_run(text)
-                    
-            # Extract and add tables if present
-            try:
-                tabs = page.find_tables()
-                for tab in tabs:
-                    table_data = tab.extract()
-                    if table_data and len(table_data) > 0:
-                        cols = len(table_data[0])
-                        docx_table = doc.add_table(rows=len(table_data), cols=cols)
-                        docx_table.style = 'Table Grid'
-                        for r_idx, row in enumerate(table_data):
-                            for c_idx, cell in enumerate(row):
-                                docx_table.cell(r_idx, c_idx).text = str(cell or "").strip()
-            except Exception:
-                pass
-                
-        pdf.close()
-        doc.save(output_path)
-    except Exception:
-        # Fallback to direct text format
-        pdf = fitz.open(input_path)
-        text_content = ""
-        for i, page in enumerate(pdf):
-            text_content += f"\n\n--- Page {i + 1} ---\n\n" + page.get_text()
-        with open(output_path.replace('.docx', '.txt'), 'w', encoding='utf-8') as f:
-            f.write(text_content)
-        pdf.close()
-    return output_path
+    from app.processors.pdf_to_word_engine import convert_pdf_to_word
+    return convert_pdf_to_word(input_path, output_path, options)
 
 def pdf_to_excel(input_path: str, output_path: str) -> str:
     """Extracts tables and tabular numerical data from PDF into CSV/Excel format."""

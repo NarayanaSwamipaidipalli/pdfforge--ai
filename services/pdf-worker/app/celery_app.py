@@ -150,7 +150,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
         elif t in ["pdf-to-word", "pdf_to_word", "pdf-to-docx"]:
             output_file_name = f"result_{job_id}.docx"
             output_path = os.path.join(work_dir, output_file_name)
-            conversions.pdf_to_word(input_paths[0], output_path)
+            conversions.pdf_to_word(input_paths[0], output_path, parameters)
         elif t in ["pdf-to-excel", "pdf_to_excel", "pdf-to-xlsx", "pdf-to-csv"]:
             output_file_name = f"result_{job_id}.csv"
             output_path = os.path.join(work_dir, output_file_name)
