@@ -67,9 +67,9 @@ export const Footer = () => {
             <ul className="space-y-2 text-xs">
               <li><Link href="/pricing" className="hover:text-blue-600">Pricing Plans</Link></li>
               <li><Link href="/organizations" className="hover:text-blue-600">Team Workspaces</Link></li>
-              <li><a href="/api/docs" target="_blank" className="hover:text-blue-600">REST & GraphQL API</a></li>
-              <li><Link href="/admin" className="hover:text-blue-600">Platform Telemetry</Link></li>
-              <li><a href="#" className="hover:text-blue-600">Security Whitepaper</a></li>
+              <li><Link href="/developers" className="hover:text-blue-600">Developer API & SDKs</Link></li>
+              <li><Link href="/blog" className="hover:text-blue-600">Engineering Blog</Link></li>
+              <li><Link href="/help" className="hover:text-blue-600">Help & Knowledge Base</Link></li>
             </ul>
           </div>
         </div>
@@ -77,9 +77,11 @@ export const Footer = () => {
         <div className="pt-8 border-t border-zinc-100 dark:border-zinc-900 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-400">
           <p>© 2026 PDFForge AI Technologies Inc. All rights reserved. Zero-permanent file retention policy.</p>
           <div className="flex items-center gap-6">
-            <a href="#" className="hover:text-zinc-600">Privacy Policy</a>
-            <a href="#" className="hover:text-zinc-600">Terms of Service</a>
-            <a href="#" className="hover:text-zinc-600">Status Page</a>
+            <Link href="/about" className="hover:text-zinc-600 dark:hover:text-zinc-300">About</Link>
+            <Link href="/contact" className="hover:text-zinc-600 dark:hover:text-zinc-300">Contact</Link>
+            <Link href="/privacy" className="hover:text-zinc-600 dark:hover:text-zinc-300">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-zinc-600 dark:hover:text-zinc-300">Terms of Service</Link>
+            <Link href="/cookies" className="hover:text-zinc-600 dark:hover:text-zinc-300">Cookie Preferences</Link>
           </div>
         </div>
       </div>

@@ -17,6 +17,8 @@ import {
   RefreshCw,
   Clock,
   AlertCircle,
+  CreditCard,
+  Settings,
 } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -181,6 +183,20 @@ export default function DashboardPage() {
             <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
               {user?.plan || 'PRO'} Plan
             </span>
+            <Link
+              href="/billing"
+              className="text-xs font-medium px-3.5 py-1.5 rounded-full border border-zinc-200 hover:bg-zinc-100 text-zinc-700 transition flex items-center gap-1.5"
+            >
+              <CreditCard className="w-3.5 h-3.5 text-zinc-500" />
+              <span>Billing</span>
+            </Link>
+            <Link
+              href="/settings"
+              className="text-xs font-medium px-3.5 py-1.5 rounded-full border border-zinc-200 hover:bg-zinc-100 text-zinc-700 transition flex items-center gap-1.5"
+            >
+              <Settings className="w-3.5 h-3.5 text-zinc-500" />
+              <span>Settings</span>
+            </Link>
             <button
               onClick={fetchDashboardData}
               className="p-2 rounded-full border border-zinc-200 hover:bg-zinc-100 text-zinc-600 transition-colors"
@@ -189,7 +205,7 @@ export default function DashboardPage() {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <Link
-              href="/pricing"
+              href="/billing"
               className="text-xs font-medium px-4 py-2 rounded-full bg-zinc-900 text-white hover:bg-zinc-800 transition-colors shadow-sm"
             >
               Upgrade Subscription

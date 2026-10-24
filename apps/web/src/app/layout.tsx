@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
+import { ToastProvider } from '@/components/ui/Toast';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://pdfforge.ai'),
@@ -96,9 +97,11 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen flex flex-col bg-[#fbfbfd] text-[#1d1d1f] selection:bg-blue-600 selection:text-white">
-        <Navbar />
-        <main className="flex-1">{children}</main>
-        <Footer />
+        <ToastProvider>
+          <Navbar />
+          <main className="flex-1">{children}</main>
+          <Footer />
+        </ToastProvider>
       </body>
     </html>
   );

@@ -4,6 +4,7 @@ import React, { useState, use, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PDF_TOOLS } from '@/lib/tools-registry';
+import { useToast } from '@/components/ui/Toast';
 import {
   UploadCloud,
   FileText,
@@ -32,6 +33,10 @@ import {
   RotateCw,
   FileSpreadsheet,
   FileCode,
+  HelpCircle,
+  ChevronDown,
+  RefreshCw,
+  Copy,
 } from 'lucide-react';
 
 interface ToolPageProps {
@@ -47,6 +52,37 @@ export default function ToolPage({ params }: ToolPageProps) {
   if (!tool) {
     notFound();
   }
+
+  const { addToast } = useToast();
+  const [openFaqIdx, setOpenFaqIdx] = useState<number | null>(null);
+
+  const handleShareTool = () => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(window.location.href);
+      addToast('Tool link copied to clipboard!', 'info');
+    }
+  };
+
+  const relatedTools = useMemo(() => {
+    return PDF_TOOLS.filter((t) => t.id !== tool?.id).slice(0, 4);
+  }, [tool]);
+
+  const toolFaqs = useMemo(() => {
+    return [
+      {
+        q: `Is the ${tool?.name} tool free to use?`,
+        a: `Yes, ${tool?.name} is completely available under the Starter Community tier with zero credit card required for standard file sizes up to 25 MB.`,
+      },
+      {
+        q: 'How does PDFForge AI guarantee document confidentiality?',
+        a: 'We strictly enforce a Zero-Permanent-Retention architecture. Files are processed in ephemeral memory buffers and automatically expunged after completion under DoD 5220.22-M sanitation standards.',
+      },
+      {
+        q: 'What is the maximum file size supported?',
+        a: 'Standard web tier processes files up to 250 MB. Enterprise and API accounts process large datasets and books up to 2 GB with custom chunked streaming.',
+      },
+    ];
+  }, [tool]);
 
   // File state
   const [files, setFiles] = useState<File[]>([]);
@@ -451,34 +487,56 @@ export default function ToolPage({ params }: ToolPageProps) {
         </div>
 
         {/* Tool Header */}
-        <div className="flex items-start gap-4 mb-8">
-          <div
-            className={`w-14 h-14 rounded-2xl bg-gradient-to-tr ${tool.accentColor} text-white flex items-center justify-center shadow-md shadow-blue-500/10 shrink-0`}
-          >
-            <FileText className="w-7 h-7" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-900 tracking-tight">
-                {tool.name}
-              </h1>
-              {tool.badge && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                  {tool.badge}
-                </span>
-              )}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+          <div className="flex items-start gap-4">
+            <div
+              className={`w-14 h-14 rounded-2xl bg-gradient-to-tr ${tool.accentColor} text-white flex items-center justify-center shadow-md shadow-blue-500/10 shrink-0`}
+            >
+              <FileText className="w-7 h-7" />
             </div>
-            <p className="text-sm text-zinc-500">{tool.description}</p>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-900 tracking-tight">
+                  {tool.name}
+                </h1>
+                {tool.badge && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    {tool.badge}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-zinc-500">{tool.description}</p>
+            </div>
           </div>
+
+          <button
+            onClick={handleShareTool}
+            className="self-start sm:self-center inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-medium shadow-sm transition"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span>Share Tool</span>
+          </button>
         </div>
 
         {/* Main Processing Workspace */}
         <div className="bg-white rounded-3xl border border-zinc-200 shadow-apple p-6 sm:p-8 mb-8">
           {/* Error Message Banner */}
           {errorMessage && (
-            <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 text-xs text-rose-800">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>{errorMessage}</span>
+            <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-rose-800">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMessage(null);
+                  handleExecuteTool();
+                }}
+                className="px-3 py-1 rounded-lg bg-rose-600 text-white font-medium hover:bg-rose-700 transition flex items-center gap-1 shrink-0"
+              >
+                <RefreshCw className="w-3 h-3" /> Retry
+              </button>
             </div>
           )}
 
@@ -1267,6 +1325,73 @@ export default function ToolPage({ params }: ToolPageProps) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Tool FAQs Accordion */}
+        <div className="bg-white rounded-3xl border border-zinc-200 shadow-sm p-6 sm:p-8 mb-8">
+          <div className="flex items-center gap-2 mb-6">
+            <HelpCircle className="w-5 h-5 text-blue-600" />
+            <h3 className="text-lg font-semibold text-zinc-900">
+              Frequently Asked Questions about {tool.name}
+            </h3>
+          </div>
+
+          <div className="space-y-3">
+            {toolFaqs.map((faq, idx) => (
+              <div
+                key={idx}
+                className="border border-zinc-100 rounded-2xl overflow-hidden bg-zinc-50/50"
+              >
+                <button
+                  type="button"
+                  onClick={() => setOpenFaqIdx(openFaqIdx === idx ? null : idx)}
+                  className="w-full text-left px-5 py-3.5 flex items-center justify-between font-medium text-xs text-zinc-800 hover:bg-zinc-100/60 transition"
+                >
+                  <span>{faq.q}</span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-zinc-400 transition-transform ${
+                      openFaqIdx === idx ? 'rotate-180 text-blue-600' : ''
+                    }`}
+                  />
+                </button>
+                {openFaqIdx === idx && (
+                  <div className="px-5 pb-4 pt-1 text-xs text-zinc-600 leading-relaxed border-t border-zinc-100 bg-white">
+                    {faq.a}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Related Tools Recommendation */}
+        <div className="mb-10">
+          <h3 className="text-base font-semibold text-zinc-900 mb-4">
+            Related Document Processing Tools
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {relatedTools.map((rt) => (
+              <Link
+                key={rt.id}
+                href={`/tools/${rt.slug}`}
+                className="p-4 rounded-2xl bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-apple transition group flex flex-col justify-between"
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <div
+                    className={`w-8 h-8 rounded-lg bg-gradient-to-tr ${rt.accentColor} text-white flex items-center justify-center text-xs shrink-0`}
+                  >
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <span className="font-semibold text-xs text-zinc-900 group-hover:text-blue-600 transition">
+                    {rt.name}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-500 line-clamp-2">
+                  {rt.description}
+                </p>
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
     </div>

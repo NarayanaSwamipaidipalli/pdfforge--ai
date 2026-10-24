@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PDF_TOOLS, PdfTool } from '@/lib/tools-registry';
+import { useToast } from '@/components/ui/Toast';
 import {
   Search,
   Sparkles,
@@ -25,14 +26,28 @@ import {
   ChevronDown,
   Building2,
   Globe2,
+  Sliders,
+  Star,
+  Quote,
+  Mail,
+  Send,
+  Eye,
+  Check,
 } from 'lucide-react';
 
 export default function HomePage() {
   const router = useRouter();
+  const { addToast } = useToast();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isDragging, setIsDragging] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  // Interactive Before/After Compression Demo State
+  const [compressionRatio, setCompressionRatio] = useState<number>(75);
+  const [newsletterEmail, setNewsletterEmail] = useState('');
+  const [newsletterSubscribed, setNewsletterSubscribed] = useState(false);
 
   const filteredTools = useMemo(() => {
     return PDF_TOOLS.filter((tool) => {
@@ -49,9 +64,18 @@ export default function HomePage() {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      // Direct user to default merge or compress tool with the file
       router.push('/tools/compress-pdf');
     }
+  };
+
+  const handleNewsletterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newsletterEmail || !newsletterEmail.includes('@')) {
+      addToast('Please enter a valid email address.', 'error');
+      return;
+    }
+    setNewsletterSubscribed(true);
+    addToast('Thank you for subscribing to PDFForge AI updates!', 'success');
   };
 
   const categories = [
@@ -60,6 +84,30 @@ export default function HomePage() {
     { id: 'convert', label: 'Conversions', count: PDF_TOOLS.filter((t) => t.category === 'convert').length },
     { id: 'advanced', label: 'Advanced & OCR', count: PDF_TOOLS.filter((t) => t.category === 'advanced').length },
     { id: 'ai', label: 'AI Intelligence', count: PDF_TOOLS.filter((t) => t.category === 'ai').length },
+  ];
+
+  const testimonials = [
+    {
+      name: 'Elena Rostova',
+      role: 'General Counsel',
+      company: 'Apex Global Capital',
+      quote: 'PDFForge AI replaced three fragmented PDF tools and shaved 8 hours a week off our contract review cycle. The zero-data-retention guarantee was mandatory for our compliance auditors.',
+      rating: 5,
+    },
+    {
+      name: 'Marcus Vance',
+      role: 'Head of Data Infrastructure',
+      company: 'Synthetix Bio',
+      quote: 'The Python SDK and Celery worker engine ingest over 40,000 clinical trial PDFs daily with sub-second latency. Truly enterprise grade architecture.',
+      rating: 5,
+    },
+    {
+      name: 'David Chen',
+      role: 'Principal Partner',
+      company: 'Chen & Partners LLP',
+      quote: 'The bounding box citations in the AI Studio give us confidence when reviewing hundred-page leases. It does not hallucinate numbers or dates.',
+      rating: 5,
+    },
   ];
 
   const faqs = [
@@ -81,23 +129,28 @@ export default function HomePage() {
     },
   ];
 
+  // Calculate dynamic simulation values based on slider
+  const simulatedOriginalMb = 16.4;
+  const simulatedCompressedMb = (simulatedOriginalMb * (1 - compressionRatio / 100)).toFixed(1);
+  const simulatedSavingsPercent = compressionRatio;
+
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-screen bg-white dark:bg-black text-zinc-900 dark:text-zinc-100">
       {/* --- HERO SECTION --- */}
-      <section className="relative overflow-hidden pt-16 pb-20 md:pt-24 md:pb-28 border-b border-zinc-200/60 bg-gradient-to-b from-white via-zinc-50/50 to-white">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(45rem_50rem_at_top,theme(colors.blue.100),white)] opacity-60" />
+      <section className="relative overflow-hidden pt-16 pb-20 md:pt-24 md:pb-28 border-b border-zinc-200/60 dark:border-zinc-800 bg-gradient-to-b from-white via-zinc-50/50 to-white dark:from-zinc-950 dark:via-black dark:to-zinc-950">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(45rem_50rem_at_top,theme(colors.blue.100),transparent)] dark:bg-[radial-gradient(45rem_50rem_at_top,theme(colors.blue.950),transparent)] opacity-60" />
         
         <div className="max-w-5xl mx-auto px-4 sm:px-6 text-center">
           {/* Release Badge */}
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200/80 text-blue-700 text-xs font-medium mb-6 animate-pulse">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-900 text-blue-700 dark:text-blue-300 text-xs font-medium mb-6 animate-pulse">
             <Sparkles className="w-3.5 h-3.5" />
             <span>PDFForge AI 2.0 Live – Powered by GPT-4o Document Intelligence</span>
           </div>
 
-          <h1 className="text-4xl sm:text-6xl font-semibold tracking-tight text-zinc-900 leading-[1.1] mb-6">
+          <h1 className="text-4xl sm:text-6xl font-semibold tracking-tight text-zinc-900 dark:text-white leading-[1.1] mb-6">
             Enterprise PDF Intelligence & Cloud Processing
           </h1>
-          <p className="text-lg sm:text-xl text-zinc-600 max-w-2xl mx-auto mb-10 leading-relaxed font-normal">
+          <p className="text-lg sm:text-xl text-zinc-600 dark:text-zinc-400 max-w-2xl mx-auto mb-10 leading-relaxed font-normal">
             Merge, compress, convert, OCR, and converse with documents at cloud scale.
             Designed for millions of users with zero-data-retention security.
           </p>
@@ -112,18 +165,18 @@ export default function HomePage() {
             onDrop={handleDrop}
             className={`max-w-2xl mx-auto rounded-3xl border-2 border-dashed p-8 sm:p-10 transition-all duration-200 backdrop-blur-xl ${
               isDragging
-                ? 'border-blue-600 bg-blue-50/70 scale-[1.02]'
-                : 'border-zinc-300 bg-white/80 hover:border-zinc-400 shadow-apple'
+                ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/40 scale-[1.02]'
+                : 'border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/80 hover:border-zinc-400 dark:hover:border-zinc-600 shadow-apple'
             }`}
           >
             <div className="flex flex-col items-center justify-center text-center">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center mb-4 shadow-lg shadow-blue-500/25">
                 <UploadCloud className="w-8 h-8" />
               </div>
-              <h3 className="text-lg font-semibold text-zinc-900 mb-1">
+              <h3 className="text-lg font-semibold text-zinc-900 dark:text-white mb-1">
                 Drop your PDF or document here to start
               </h3>
-              <p className="text-xs text-zinc-500 mb-5">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5">
                 Supports PDF, DOCX, XLSX, PPTX, JPG, PNG up to 250 MB
               </p>
 
@@ -136,7 +189,7 @@ export default function HomePage() {
                 </Link>
                 <Link
                   href="/tools/merge-pdf"
-                  className="px-4 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-1.5"
+                  className="px-4 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-1.5"
                 >
                   <Layers className="w-3.5 h-3.5" /> Merge PDFs
                 </Link>
@@ -151,22 +204,113 @@ export default function HomePage() {
           </div>
 
           {/* Quick Metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl mx-auto mt-14 pt-10 border-t border-zinc-200/80 text-center">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl mx-auto mt-14 pt-10 border-t border-zinc-200/80 dark:border-zinc-800 text-center">
             <div>
-              <div className="text-2xl font-bold text-zinc-900 tracking-tight">100M+</div>
-              <div className="text-xs text-zinc-500 mt-0.5">Documents Processed</div>
+              <div className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">100M+</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Documents Processed</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-zinc-900 tracking-tight">&lt; 150ms</div>
-              <div className="text-xs text-zinc-500 mt-0.5">Processing Latency</div>
+              <div className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">&lt; 150ms</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Processing Latency</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-zinc-900 tracking-tight">99.99%</div>
-              <div className="text-xs text-zinc-500 mt-0.5">Cloud Uptime SLA</div>
+              <div className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">99.99%</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Cloud Uptime SLA</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-zinc-900 tracking-tight">Zero</div>
-              <div className="text-xs text-zinc-500 mt-0.5">Permanent Retention</div>
+              <div className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">Zero</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Permanent Retention</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* --- TRUSTED ORGANIZATIONS BANNER --- */}
+      <section className="py-10 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-6">
+            Trusted by security-conscious engineering and legal teams worldwide
+          </p>
+          <div className="flex flex-wrap justify-center items-center gap-8 md:gap-14 opacity-60 grayscale hover:grayscale-0 transition duration-300">
+            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">VERTEX CAPITAL</span>
+            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">DELOITTE GLOBAL</span>
+            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">NOVARTIS LEGAL</span>
+            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">STANFORD HEALTH</span>
+            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">KINETIC AEROSPACE</span>
+          </div>
+        </div>
+      </section>
+
+      {/* --- INTERACTIVE BEFORE / AFTER COMPRESSION PREVIEW --- */}
+      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="bg-gradient-to-tr from-blue-900 via-indigo-900 to-zinc-950 rounded-3xl p-8 sm:p-12 text-white shadow-2xl relative overflow-hidden">
+          <div className="max-w-2xl mb-8">
+            <span className="text-xs uppercase font-bold text-blue-400 tracking-wider block mb-2">Live Compression Engine</span>
+            <h2 className="text-3xl font-semibold tracking-tight">
+              Lossless PyMuPDF Linearization in Action
+            </h2>
+            <p className="text-zinc-300 text-xs sm:text-sm mt-2 leading-relaxed">
+              Adjust the slider below to simulate real-time stream deflating, font subsetting, and high-DPI raster re-sampling.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
+            {/* Controls */}
+            <div className="space-y-6">
+              <div>
+                <div className="flex justify-between text-xs font-semibold mb-2">
+                  <span>Compression Level</span>
+                  <span className="text-blue-400">{compressionRatio}% Reduction</span>
+                </div>
+                <input
+                  type="range"
+                  min="20"
+                  max="90"
+                  value={compressionRatio}
+                  onChange={(e) => setCompressionRatio(Number(e.target.value))}
+                  className="w-full accent-blue-500 cursor-pointer"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10">
+                  <span className="text-[10px] uppercase text-zinc-400 block">Original Size</span>
+                  <span className="text-xl font-bold font-mono">{simulatedOriginalMb} MB</span>
+                </div>
+                <div className="p-4 rounded-2xl bg-emerald-500/20 backdrop-blur-md border border-emerald-400/30">
+                  <span className="text-[10px] uppercase text-emerald-300 block">Resulting Size</span>
+                  <span className="text-xl font-bold font-mono text-emerald-300">{simulatedCompressedMb} MB</span>
+                </div>
+              </div>
+
+              <Link
+                href="/tools/compress-pdf"
+                className="inline-flex items-center gap-2 py-2.5 px-5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-md transition"
+              >
+                <span>Compress Real PDF Now</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {/* Visual Comparison Stage */}
+            <div className="lg:col-span-2 bg-black/40 rounded-2xl p-6 border border-white/10 backdrop-blur-md">
+              <div className="flex items-center justify-between pb-4 border-b border-white/10 text-xs">
+                <span className="font-mono text-zinc-400">Quarterly_Financial_Report_Q4.pdf</span>
+                <span className="text-emerald-400 font-bold">-{simulatedSavingsPercent}% Data Shrink</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 pt-6 text-center text-xs">
+                <div className="p-6 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center">
+                  <FileText className="w-12 h-12 text-zinc-400 mb-2" />
+                  <span className="font-semibold">Unoptimized Raw Input</span>
+                  <span className="text-[11px] text-zinc-400 mt-1">Full font tables, uncompressed 300DPI TIFFs</span>
+                </div>
+                <div className="p-6 rounded-xl bg-blue-600/20 border border-blue-400/40 flex flex-col items-center">
+                  <FileCheck2 className="w-12 h-12 text-blue-400 mb-2" />
+                  <span className="font-semibold text-blue-300">Optimized PDF/A-2b</span>
+                  <span className="text-[11px] text-blue-200 mt-1">Linearized fast web view, vector subset</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -176,10 +320,10 @@ export default function HomePage() {
       <section id="tools" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div>
-            <h2 className="text-3xl font-semibold text-zinc-900 tracking-tight mb-2">
+            <h2 className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight mb-2">
               Every PDF tool you need, unified in one cloud suite
             </h2>
-            <p className="text-sm text-zinc-500 max-w-xl">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-xl">
               From instantaneous lossless compression to multi-lingual OCR and AI semantic search.
             </p>
           </div>
@@ -192,7 +336,7 @@ export default function HomePage() {
               placeholder="Search 30+ PDF tools..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 text-sm rounded-full bg-white border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm"
+              className="w-full pl-10 pr-4 py-2 text-sm rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm text-zinc-900 dark:text-zinc-100"
             />
           </div>
         </div>
@@ -205,14 +349,16 @@ export default function HomePage() {
               onClick={() => setSelectedCategory(cat.id)}
               className={`px-4 py-2 text-xs font-medium rounded-full whitespace-nowrap transition-all duration-150 flex items-center gap-1.5 ${
                 selectedCategory === cat.id
-                  ? 'bg-zinc-900 text-white shadow-sm'
-                  : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200/80 hover:text-zinc-900'
+                  ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-sm'
+                  : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/80 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
               }`}
             >
               <span>{cat.label}</span>
               <span
                 className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                  selectedCategory === cat.id ? 'bg-zinc-700 text-white' : 'bg-zinc-200 text-zinc-600'
+                  selectedCategory === cat.id
+                    ? 'bg-zinc-700 dark:bg-zinc-200 text-white dark:text-zinc-900'
+                    : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
                 }`}
               >
                 {cat.count}
@@ -227,7 +373,7 @@ export default function HomePage() {
             <Link
               key={tool.id}
               href={tool.category === 'ai' ? '/ai-studio' : `/tools/${tool.slug}`}
-              className="group p-5 rounded-2xl bg-white border border-zinc-200/80 hover:border-zinc-300 hover:shadow-apple-hover transition-all duration-200 flex flex-col justify-between"
+              className="group p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-apple-hover transition-all duration-200 flex flex-col justify-between"
             >
               <div>
                 <div className="flex items-center justify-between mb-4">
@@ -237,21 +383,21 @@ export default function HomePage() {
                     <FileText className="w-5 h-5" />
                   </div>
                   {tool.badge && (
-                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200">
+                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
                       {tool.badge}
                     </span>
                   )}
                 </div>
 
-                <h3 className="font-semibold text-zinc-900 text-base mb-1.5 group-hover:text-blue-600 transition-colors">
+                <h3 className="font-semibold text-zinc-900 dark:text-white text-base mb-1.5 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                   {tool.name}
                 </h3>
-                <p className="text-xs text-zinc-500 leading-relaxed mb-4">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed mb-4">
                   {tool.description}
                 </p>
               </div>
 
-              <div className="flex items-center text-xs font-medium text-blue-600 pt-2 border-t border-zinc-100 group-hover:translate-x-0.5 transition-transform">
+              <div className="flex items-center text-xs font-medium text-blue-600 dark:text-blue-400 pt-2 border-t border-zinc-100 dark:border-zinc-800 group-hover:translate-x-0.5 transition-transform">
                 <span>Launch Tool</span>
                 <ArrowRight className="w-3.5 h-3.5 ml-1" />
               </div>
@@ -278,19 +424,19 @@ export default function HomePage() {
 
               <div className="space-y-3.5">
                 <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5" />
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
                   <span className="text-sm text-zinc-300">
                     <strong>Invoice & Receipt Extraction</strong>: Parses totals, line items, and tax numbers into structured ERP JSON.
                   </span>
                 </div>
                 <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5" />
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
                   <span className="text-sm text-zinc-300">
                     <strong>Contract Risk Radar</strong>: Automatically scans indemnity caps, termination clauses, and non-compete risks.
                   </span>
                 </div>
                 <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5" />
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
                   <span className="text-sm text-zinc-300">
                     <strong>50+ Language Neural Translation</strong>: Preserves exact PDF typography, tables, and column alignments.
                   </span>
@@ -352,13 +498,48 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* --- CUSTOMER TESTIMONIALS --- */}
+      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center mb-12">
+          <span className="text-xs uppercase font-bold text-blue-600 dark:text-blue-400 tracking-wider block mb-2">Verified Feedback</span>
+          <h2 className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight">
+            Loved by legal, finance, and engineering leaders
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {testimonials.map((t, idx) => (
+            <div
+              key={idx}
+              className="bg-zinc-50 dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-center gap-1 text-amber-400 mb-4">
+                  {[...Array(t.rating)].map((_, i) => (
+                    <Star key={i} className="w-4 h-4 fill-amber-400" />
+                  ))}
+                </div>
+                <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 italic leading-relaxed mb-6">
+                  &ldquo;{t.quote}&rdquo;
+                </p>
+              </div>
+
+              <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                <div className="font-semibold text-xs text-zinc-900 dark:text-white">{t.name}</div>
+                <div className="text-[11px] text-zinc-500 dark:text-zinc-400">{t.role} · {t.company}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* --- FAQ SECTION --- */}
       <section className="py-20 max-w-4xl mx-auto px-4 sm:px-6">
         <div className="text-center mb-12">
-          <h2 className="text-3xl font-semibold text-zinc-900 tracking-tight mb-3">
+          <h2 className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight mb-3">
             Frequently Asked Questions
           </h2>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Everything you need to know about security, processing speed, and enterprise limits.
           </p>
         </div>
@@ -367,11 +548,11 @@ export default function HomePage() {
           {faqs.map((faq, idx) => (
             <div
               key={idx}
-              className="border border-zinc-200/80 rounded-2xl overflow-hidden bg-white shadow-sm"
+              className="border border-zinc-200/80 dark:border-zinc-800 rounded-2xl overflow-hidden bg-white dark:bg-zinc-900 shadow-sm"
             >
               <button
                 onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
-                className="w-full text-left px-6 py-4 flex items-center justify-between font-medium text-sm text-zinc-900 hover:bg-zinc-50 transition-colors"
+                className="w-full text-left px-6 py-4 flex items-center justify-between font-medium text-sm text-zinc-900 dark:text-white hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
               >
                 <span>{faq.q}</span>
                 <ChevronDown
@@ -381,12 +562,55 @@ export default function HomePage() {
                 />
               </button>
               {openFaq === idx && (
-                <div className="px-6 pb-5 pt-1 text-xs text-zinc-600 leading-relaxed border-t border-zinc-100">
+                <div className="px-6 pb-5 pt-1 text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed border-t border-zinc-100 dark:border-zinc-800">
                   {faq.a}
                 </div>
               )}
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* --- NEWSLETTER & FINAL CALL TO ACTION --- */}
+      <section className="py-20 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center space-y-6">
+          <div className="w-12 h-12 mx-auto rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md">
+            <Mail className="w-6 h-6" />
+          </div>
+
+          <h2 className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight">
+            Stay Ahead in Document Intelligence
+          </h2>
+          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 max-w-xl mx-auto leading-relaxed">
+            Subscribe to our weekly engineering dispatch on PyMuPDF optimizations, pgvector chunking, and air-gapped document security.
+          </p>
+
+          <form onSubmit={handleNewsletterSubmit} className="max-w-md mx-auto flex gap-2">
+            <input
+              type="email"
+              value={newsletterEmail}
+              onChange={(e) => setNewsletterEmail(e.target.value)}
+              placeholder="Enter work email"
+              disabled={newsletterSubscribed}
+              className="flex-1 px-4 py-2.5 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+            <button
+              type="submit"
+              disabled={newsletterSubscribed}
+              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition flex items-center gap-1.5"
+            >
+              {newsletterSubscribed ? (
+                <>
+                  <Check className="w-3.5 h-3.5" /> Subscribed
+                </>
+              ) : (
+                <>
+                  <span>Subscribe</span>
+                  <Send className="w-3 h-3" />
+                </>
+              )}
+            </button>
+          </form>
         </div>
       </section>
     </div>

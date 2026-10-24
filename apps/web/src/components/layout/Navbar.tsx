@@ -24,10 +24,10 @@ export const Navbar = () => {
 
   const navLinks = [
     { label: 'Tools', href: '/#tools' },
+    { label: 'Features', href: '/features' },
     { label: 'AI Studio', href: '/ai-studio', badge: 'GPT-4o' },
-    { label: 'Dashboard', href: '/dashboard' },
-    { label: 'Organizations', href: '/organizations' },
     { label: 'Pricing', href: '/pricing' },
+    { label: 'Developers', href: '/developers' },
     ...(user?.role === 'ADMIN' || user?.role === 'SUPERADMIN'
       ? [{ label: 'Admin', href: '/admin' }]
       : []),
