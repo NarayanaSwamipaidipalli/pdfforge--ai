@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+scrape_configs:
+  - job_name: "pdfforge-api-gateway"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["api-gateway:4000"]
+
+  - job_name: "pdfforge-pdf-worker"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["pdf-worker:8000"]
+
+  - job_name: "pdfforge-redis"
+    static_configs:
+      - targets: ["redis:6379"]

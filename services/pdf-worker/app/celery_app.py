@@ -48,8 +48,9 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
         input_paths = []
         for idx, f in enumerate(files):
             file_id_clean = str(f.get("id", idx))[:8]
-            orig_name = f.get("originalName", f"doc_{idx}.pdf")
-            local_filename = f"{idx}_{file_id_clean}_{orig_name}"
+            raw_name = str(f.get("originalName", f"doc_{idx}.pdf"))
+            clean_name = os.path.basename(raw_name).replace("..", "").strip() or f"doc_{idx}.pdf"
+            local_filename = f"{idx}_{file_id_clean}_{clean_name}"
             local_path = os.path.join(work_dir, local_filename)
             s3_key = f.get("s3Key")
             downloaded = False
@@ -63,7 +64,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 import fitz
                 doc = fitz.open()
                 page = doc.new_page()
-                page.insert_text(fitz.Point(72, 72), f"PDFForge AI: {orig_name}", fontsize=20)
+                page.insert_text(fitz.Point(72, 72), f"PDFForge AI: {clean_name}", fontsize=20)
                 doc.save(local_path)
                 doc.close()
             input_paths.append(local_path)

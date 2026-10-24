@@ -1,0 +1,29 @@
+groups:
+  - name: pdfforge-production-alerts
+    rules:
+      - alert: HighJobFailureRate
+        expr: rate(pdf_processing_failures_total[5m]) / rate(pdf_processing_jobs_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PDF Processing Job failure rate exceeds 5%"
+          description: "Microservice workers are reporting high error rates on document conversions."
+
+      - alert: WorkerQueueBacklog
+        expr: celery_queue_length > 250
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Celery task queue backlog above threshold"
+          description: "More than 250 jobs are waiting for worker execution slots. Consider auto-scaling workers."
+
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container memory utilization exceeds 85%"
+          description: "Pod memory is nearing limits. Potential OOMKill risk."
