@@ -20,10 +20,13 @@ logger.setLevel(logging.INFO)
 class ConversionConfig:
     def __init__(self, options: Optional[Dict[str, Any]] = None):
         opts = options or {}
-        # Only run full OCR if explicitly requested by user (e.g. OCR tool, enableOcr)
-        self.ocr_enabled: bool = bool(opts.get("enableOcr") or opts.get("ocr") or opts.get("ocr_enabled"))
+        # Auto-detect OCR if document contains scanned pages without digital text
+        self.ocr_enabled: bool = bool(
+            opts.get("enableOcr") or opts.get("ocr") or opts.get("ocr_enabled") or opts.get("auto_ocr", True)
+        )
         self.ocr_language: str = opts.get("ocr_language") or opts.get("ocrLanguage", "eng")
         self.dpi: int = min(150, int(opts.get("dpi", 150)))
+        self.max_ocr_pages: int = int(opts.get("max_ocr_pages", 60))
         self.chunk_size: int = int(opts.get("chunk_size", 50))
         self.preserve_images: bool = opts.get("preserve_images", True)
         self.table_recognition: bool = opts.get("table_recognition", True)
@@ -81,14 +84,13 @@ def add_hyperlink_to_paragraph(paragraph, url: str, text: str, font_size_pt: flo
     paragraph._p.append(hyperlink)
 
 
-def detect_scanned_document(doc: fitz.Document, sample_pages: int = 5) -> Tuple[bool, List[int]]:
+def detect_scanned_document(doc: fitz.Document, sample_pages: int = 10) -> Tuple[bool, List[int]]:
     """
     Detects whether pages in a PDF are scanned / bitmap-only pages requiring OCR.
     Returns (has_any_scanned, list_of_scanned_page_indices).
     """
     scanned_pages = []
     total = len(doc)
-    pages_to_check = list(range(min(total, sample_pages)))
     
     for idx in range(total):
         page = doc[idx]
@@ -137,18 +139,17 @@ def preprocess_pdf_with_ocr_if_needed(input_path: str, config: ConversionConfig)
         return input_path
         
     doc = fitz.open(input_path)
-    # Don't run automatic OCR on massive documents (> 25 pages) to prevent timeouts
-    if len(doc) > 25:
-        doc.close()
-        logger.info(f"Skipping OCR enhancement on {len(doc)}-page document to maintain fast conversion.")
-        return input_path
-
     is_scanned, scanned_indices = detect_scanned_document(doc)
     
     if not is_scanned:
         doc.close()
         return input_path
         
+    # Cap to max_ocr_pages to avoid timeout
+    if len(scanned_indices) > config.max_ocr_pages:
+        logger.warning(f"Document has {len(scanned_indices)} scanned pages; running OCR on first {config.max_ocr_pages} pages.")
+        scanned_indices = scanned_indices[:config.max_ocr_pages]
+
     logger.info(f"Detected {len(scanned_indices)} scanned page(s). Running OCR enhancement at {config.dpi} DPI...")
     ocr_doc = fitz.open()
     
@@ -189,10 +190,9 @@ def convert_with_pdf2docx_engine(input_path: str, output_path: str, config: Conv
         
         cv = Converter(input_path)
         
-        # For huge documents (> 60 pages), convert in chunks to control memory
+        # For large documents (> 60 pages), convert with chunking
         if total_pages > 60:
             logger.info(f"Processing large document ({total_pages} pages) in chunks of {config.chunk_size}...")
-            # pdf2docx supports batch conversion
             cv.convert(output_path, start=0, end=total_pages)
         else:
             cv.convert(output_path, start=0, end=None)
@@ -209,8 +209,8 @@ def convert_with_native_pipeline(input_path: str, output_path: str, config: Conv
     Enterprise-grade native fallback converter:
     Extracts structured layout directly from PyMuPDF dict & tables:
     - Preserves page dimensions (Pt), margins, and orientation
+    - Preserves continuous block paragraph flow with smart alignment
     - Preserves font size, font family, RGB color, bold, italic
-    - Preserves paragraph alignment (Center, Right, Left)
     - Reconstructs tables with cell borders, widths, and background colors
     - Extracts embedded images with exact aspect ratio scaling
     - Preserves hyperlinks with active Word URLs
@@ -303,7 +303,7 @@ def convert_with_native_pipeline(input_path: str, output_path: str, config: Conv
         except Exception as e:
             logger.warning(f"Table parsing error on page {page_idx}: {e}")
 
-        # 4. Extract Structured Text with Typography
+        # 4. Extract Structured Text with Typography (Block-level grouping for continuous paragraphs)
         text_dict = page.get_text("dict")
         blocks = text_dict.get("blocks", [])
         
@@ -316,23 +316,30 @@ def convert_with_native_pipeline(input_path: str, output_path: str, config: Conv
             # Type 0: Text Block
             if b.get("type") == 0:
                 block_lines = b.get("lines", [])
-                for line in block_lines:
+                if not block_lines:
+                    continue
+                    
+                mid_x = (b_rect.x0 + b_rect.x1) / 2.0
+                page_mid_x = page_rect.width / 2.0
+                b_width = b_rect.x1 - b_rect.x0
+                
+                p = doc.add_paragraph()
+                p.paragraph_format.space_after = Pt(4)
+                p.paragraph_format.line_spacing = 1.15
+                
+                # Determine paragraph alignment based on geometric placement
+                if abs(mid_x - page_mid_x) < 40 and b_width < usable_width * 0.75:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                elif b_rect.x0 > page_rect.width * 0.55:
+                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                elif len(block_lines) > 2 and b_width > usable_width * 0.8:
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                else:
+                    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+                for l_idx, line in enumerate(block_lines):
                     line_rect = fitz.Rect(line["bbox"])
-                    p = doc.add_paragraph()
-                    p.paragraph_format.space_after = Pt(2)
-                    p.paragraph_format.line_spacing = 1.15
                     
-                    # Alignment calculation
-                    mid_x = (line_rect.x0 + line_rect.x1) / 2.0
-                    page_mid_x = page_rect.width / 2.0
-                    
-                    if abs(mid_x - page_mid_x) < 30 and (line_rect.x1 - line_rect.x0) < usable_width * 0.7:
-                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    elif line_rect.x0 > page_rect.width * 0.6:
-                        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    else:
-                        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        
                     # Check for hyperlinks
                     active_url = None
                     for l_rect, uri in link_map.items():
@@ -340,10 +347,15 @@ def convert_with_native_pipeline(input_path: str, output_path: str, config: Conv
                             active_url = uri
                             break
 
-                    for span in line.get("spans", []):
+                    spans = line.get("spans", [])
+                    for s_idx, span in enumerate(spans):
                         text = span.get("text", "")
                         if not text:
                             continue
+                            
+                        # Prepend space between lines if not already present
+                        if l_idx > 0 and s_idx == 0 and not text.startswith(" "):
+                            text = " " + text
                             
                         font_size = span.get("size", 11)
                         font_name = span.get("font", "Calibri")
@@ -407,7 +419,6 @@ def convert_with_native_pipeline(input_path: str, output_path: str, config: Conv
                     if not image_bytes or len(image_bytes) < 1024:
                         continue  # Skip tiny icons / decorative artifacts
                         
-                    # Check if already embedded via blocks
                     with Image.open(io.BytesIO(image_bytes)) as pil_img:
                         w, h = pil_img.size
                         if w < 50 or h < 50:
@@ -434,14 +445,13 @@ def post_process_word_document(docx_path: str):
     Enhances generated DOCX document:
     - Normalizes cell margins and padding
     - Ensures valid borders on tables
-    - Removes excessive trailing blank paragraphs
+    - Prevents table row splitting across pages
     """
     try:
         doc = Document(docx_path)
         for tbl in doc.tables:
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             for row in tbl.rows:
-                # Disallow row splitting across pages for professional presentation
                 trPr = row._tr.get_or_add_trPr()
                 trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         doc.save(docx_path)
