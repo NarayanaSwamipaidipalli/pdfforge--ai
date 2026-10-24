@@ -1,8 +1,65 @@
 import os
 import io
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import fitz  # PyMuPDF
 from PIL import Image
+
+def parse_page_indices(raw: Any, preserve_order: bool = False) -> List[int]:
+    """
+    Safely parses diverse page specifications (string, int, list, comma-separated, ranges)
+    into normalized 0-indexed integers.
+    """
+    if raw is None or raw == "" or raw is False:
+        return []
+        
+    def extract_raw_numbers(val: Any) -> List[int]:
+        extracted = []
+        if isinstance(val, (int, float)):
+            extracted.append(int(val))
+        elif isinstance(val, (list, tuple, set)):
+            for item in val:
+                extracted.extend(extract_raw_numbers(item))
+        elif isinstance(val, str):
+            for part in str(val).split(','):
+                part = part.strip()
+                if not part:
+                    continue
+                if '-' in part:
+                    sub = part.split('-')
+                    if len(sub) == 2:
+                        try:
+                            s, e = int(sub[0].strip()), int(sub[1].strip())
+                            if s > e:
+                                s, e = e, s
+                            extracted.extend(range(s, e + 1))
+                        except ValueError:
+                            pass
+                else:
+                    try:
+                        extracted.append(int(part))
+                    except ValueError:
+                        pass
+        return extracted
+
+    nums = extract_raw_numbers(raw)
+    if not nums:
+        return []
+        
+    # If lowest page number is >= 1, it's 1-indexed (e.g. page 1, 2, 3), convert to 0-indexed
+    # If 0 is present (already 0-indexed), keep as is
+    if min(nums) >= 1:
+        nums = [n - 1 for n in nums]
+        
+    if preserve_order:
+        seen = set()
+        res = []
+        for x in nums:
+            if x not in seen:
+                seen.add(x)
+                res.append(x)
+        return res
+    else:
+        return sorted(list(set(nums)))
 
 def merge_pdfs(input_paths: List[str], output_path: str) -> str:
     """Merges multiple PDF documents into a single sequential PDF."""
@@ -14,17 +71,19 @@ def merge_pdfs(input_paths: List[str], output_path: str) -> str:
     result_doc.close()
     return output_path
 
-def split_pdf(input_path: str, output_path: str, page_ranges: Optional[List[int]] = None) -> str:
+def split_pdf(input_path: str, output_path: str, page_ranges: Any = None) -> str:
     """Splits or slices specified pages from a PDF document."""
     doc = fitz.open(input_path)
     result_doc = fitz.open()
     
     total_pages = len(doc)
-    pages_to_keep = page_ranges if page_ranges else list(range(total_pages))
+    parsed = parse_page_indices(page_ranges) if page_ranges is not None and page_ranges != "" and page_ranges != [] else []
+    pages_to_keep = [p for p in parsed if isinstance(p, int) and 0 <= p < total_pages]
+    if not pages_to_keep:
+        pages_to_keep = list(range(total_pages))
     
     for p in pages_to_keep:
-        if 0 <= p < total_pages:
-            result_doc.insert_pdf(doc, from_page=p, to_page=p)
+        result_doc.insert_pdf(doc, from_page=p, to_page=p)
             
     result_doc.save(output_path, garbage=4, deflate=True)
     doc.close()
@@ -94,40 +153,62 @@ def compress_pdf(input_path: str, output_path: str, level: str = "medium") -> st
     doc.close()
     return output_path
 
-def rotate_pdf(input_path: str, output_path: str, degrees: int = 90, pages: Optional[List[int]] = None) -> str:
+def rotate_pdf(input_path: str, output_path: str, degrees: int = 90, pages: Any = None) -> str:
     """Rotates all or specified pages in the PDF by 90, 180, or 270 degrees."""
     doc = fitz.open(input_path)
+    target_pages = set(parse_page_indices(pages)) if pages else None
     for i, page in enumerate(doc):
-        if pages is None or i in pages:
+        if target_pages is None or i in target_pages:
             current_rotation = page.rotation
-            page.set_rotation((current_rotation + degrees) % 360)
+            page.set_rotation((current_rotation + int(degrees)) % 360)
             
     doc.save(output_path, garbage=3, deflate=True)
     doc.close()
     return output_path
 
-def delete_pages(input_path: str, output_path: str, pages_to_delete: List[int]) -> str:
-    """Removes targeted page numbers (0-indexed) from the PDF document."""
+def delete_pages(input_path: str, output_path: str, pages_to_delete: Any) -> str:
+    """Removes targeted page numbers from the PDF document safely."""
     doc = fitz.open(input_path)
-    for p in sorted(pages_to_delete, reverse=True):
-        if 0 <= p < len(doc):
-            doc.delete_page(p)
+    total_pages = len(doc)
+    
+    parsed = parse_page_indices(pages_to_delete)
+    valid_to_del = {p for p in parsed if isinstance(p, int) and 0 <= p < total_pages}
+    
+    if not valid_to_del:
+        doc.save(output_path, garbage=4, deflate=True)
+        doc.close()
+        return output_path
+        
+    if len(valid_to_del) >= total_pages:
+        doc.close()
+        raise ValueError(
+            f"Cannot delete all {total_pages} page(s) from document. A valid PDF must retain at least one page."
+        )
+        
+    for p in sorted(valid_to_del, reverse=True):
+        doc.delete_page(p)
+        
     doc.save(output_path, garbage=4, deflate=True)
     doc.close()
     return output_path
 
-def extract_pages(input_path: str, output_path: str, pages_to_extract: List[int]) -> str:
+def extract_pages(input_path: str, output_path: str, pages_to_extract: Any) -> str:
     """Extracts only targeted page numbers into a standalone PDF."""
     return split_pdf(input_path, output_path, pages_to_extract)
 
-def reorder_pages(input_path: str, output_path: str, new_order: List[int]) -> str:
+def reorder_pages(input_path: str, output_path: str, new_order: Any) -> str:
     """Rearranges the page order of a PDF to match new_order list."""
     doc = fitz.open(input_path)
     result_doc = fitz.open()
+    total_pages = len(doc)
     
-    for p in new_order:
-        if 0 <= p < len(doc):
-            result_doc.insert_pdf(doc, from_page=p, to_page=p)
+    parsed = parse_page_indices(new_order, preserve_order=True)
+    order = [p for p in parsed if isinstance(p, int) and 0 <= p < total_pages]
+    if not order:
+        order = list(range(total_pages))
+    
+    for p in order:
+        result_doc.insert_pdf(doc, from_page=p, to_page=p)
             
     result_doc.save(output_path, garbage=3, deflate=True)
     doc.close()
@@ -137,9 +218,9 @@ def reorder_pages(input_path: str, output_path: str, new_order: List[int]) -> st
 def organize_pages(
     input_path: str,
     output_path: str,
-    new_order: Optional[List[int]] = None,
-    pages_to_delete: Optional[List[int]] = None,
-    rotations: Optional[Dict[int, int]] = None
+    new_order: Any = None,
+    pages_to_delete: Any = None,
+    rotations: Optional[Dict[Any, int]] = None
 ) -> str:
     """
     Unified page organizer: deletes unneeded pages, reorders remaining,
@@ -147,10 +228,12 @@ def organize_pages(
     """
     doc = fitz.open(input_path)
     total = len(doc)
-    to_delete = set(pages_to_delete or [])
+    to_delete = set(parse_page_indices(pages_to_delete)) if pages_to_delete else set()
+    order_parsed = parse_page_indices(new_order, preserve_order=True) if new_order else []
     
     # Determine base order
-    base_order = [p for p in (new_order or list(range(total))) if p not in to_delete and 0 <= p < total]
+    candidate_order = order_parsed if order_parsed else list(range(total))
+    base_order = [p for p in candidate_order if isinstance(p, int) and p not in to_delete and 0 <= p < total]
     if not base_order:
         base_order = [p for p in range(total) if p not in to_delete]
     if not base_order:
@@ -159,10 +242,10 @@ def organize_pages(
     result_doc = fitz.open()
     for idx, p in enumerate(base_order):
         result_doc.insert_pdf(doc, from_page=p, to_page=p)
-        if rotations and (p in rotations or idx in rotations):
-            rot_deg = rotations.get(p, rotations.get(idx, 0))
+        if rotations:
+            rot_deg = rotations.get(p, rotations.get(str(p), rotations.get(idx, 0)))
             page = result_doc[-1]
-            page.set_rotation((page.rotation + rot_deg) % 360)
+            page.set_rotation((page.rotation + int(rot_deg)) % 360)
             
     result_doc.save(output_path, garbage=4, deflate=True)
     doc.close()
@@ -176,12 +259,13 @@ def crop_pdf(
     bottom: float = 36,
     left: float = 36,
     right: float = 36,
-    pages: Optional[List[int]] = None
+    pages: Any = None
 ) -> str:
     """Crops page margins by adjusting the visible cropbox rectangle."""
     doc = fitz.open(input_path)
+    target_pages = set(parse_page_indices(pages)) if pages else None
     for i, page in enumerate(doc):
-        if pages is None or i in pages:
+        if target_pages is None or i in target_pages:
             rect = page.rect
             new_rect = fitz.Rect(
                 rect.x0 + left,

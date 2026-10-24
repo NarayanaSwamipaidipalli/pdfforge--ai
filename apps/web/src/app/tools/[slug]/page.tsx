@@ -223,6 +223,16 @@ export default function ToolPage({ params }: ToolPageProps) {
       return;
     }
 
+    if (tool.id === 'delete-pages' && !deletePages.trim()) {
+      setErrorMessage('Please enter the page number(s) to delete (e.g. 1, 3, 5).');
+      return;
+    }
+
+    if (tool.id === 'extract-pages' && !extractPages.trim()) {
+      setErrorMessage('Please enter the page number(s) to extract (e.g. 1, 3-5).');
+      return;
+    }
+
     setIsProcessing(true);
     setProcessingStep(1);
 

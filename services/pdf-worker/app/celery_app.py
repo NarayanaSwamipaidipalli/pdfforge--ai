@@ -78,47 +78,27 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
         if t in ["merge", "merge-pdf", "combine", "combine-pdf"]:
             basic_tools.merge_pdfs(input_paths, output_path)
         elif t in ["split", "split-pdf"]:
-            pages = parameters.get("pages")
-            if not pages and parameters.get("pageRange"):
-                try:
-                    pages = []
-                    for part in str(parameters.get("pageRange")).split(","):
-                        if "-" in part:
-                            start, end = part.split("-")
-                            pages.extend(range(int(start.strip()) - 1, int(end.strip())))
-                        else:
-                            pages.append(int(part.strip()) - 1)
-                except Exception:
-                    pages = None
-            basic_tools.split_pdf(input_paths[0], output_path, pages)
+            pages_raw = parameters.get("pages") or parameters.get("pageRange")
+            basic_tools.split_pdf(input_paths[0], output_path, pages_raw)
         elif t in ["compress", "compress-pdf", "batch", "batch-processing"]:
             basic_tools.compress_pdf(input_paths[0], output_path, parameters.get("compressionLevel", "medium"))
         elif t in ["rotate", "rotate-pdf"]:
-            basic_tools.rotate_pdf(input_paths[0], output_path, int(parameters.get("rotationDegrees", 90)))
+            pages_raw = parameters.get("pages") or parameters.get("pagesToRotate")
+            basic_tools.rotate_pdf(input_paths[0], output_path, int(parameters.get("rotationDegrees", 90)), pages_raw)
         elif t in ["delete-pages", "delete-pdf-pages", "delete_pages", "delete"]:
-            pages_to_del = parameters.get("pagesToDelete", [])
-            if not pages_to_del and parameters.get("deletePages"):
-                try:
-                    pages_to_del = [int(p.strip()) - 1 for p in str(parameters.get("deletePages")).split(",") if p.strip()]
-                except Exception:
-                    pages_to_del = []
-            basic_tools.delete_pages(input_paths[0], output_path, pages_to_del)
+            pages_raw = parameters.get("pagesToDelete") or parameters.get("deletePages")
+            basic_tools.delete_pages(input_paths[0], output_path, pages_raw)
         elif t in ["extract-pages", "extract-pdf-pages", "extract_pages", "extract"]:
-            pages_to_ext = parameters.get("pagesToExtract", [])
-            if not pages_to_ext and parameters.get("extractPages"):
-                try:
-                    pages_to_ext = [int(p.strip()) - 1 for p in str(parameters.get("extractPages")).split(",") if p.strip()]
-                except Exception:
-                    pages_to_ext = []
-            basic_tools.extract_pages(input_paths[0], output_path, pages_to_ext)
+            pages_raw = parameters.get("pagesToExtract") or parameters.get("extractPages")
+            basic_tools.extract_pages(input_paths[0], output_path, pages_raw)
         elif t in ["reorder", "reorder-pages", "reorder_pages"]:
-            basic_tools.reorder_pages(input_paths[0], output_path, parameters.get("newOrder", []))
+            basic_tools.reorder_pages(input_paths[0], output_path, parameters.get("newOrder"))
         elif t in ["organize", "organize-pages", "organize-pdf-pages"]:
             basic_tools.organize_pages(
                 input_paths[0],
                 output_path,
                 new_order=parameters.get("newOrder"),
-                pages_to_delete=parameters.get("pagesToDelete"),
+                pages_to_delete=parameters.get("pagesToDelete") or parameters.get("deletePages"),
                 rotations=parameters.get("rotations")
             )
         elif t in ["crop", "crop-pdf", "crop_pdf"]:
