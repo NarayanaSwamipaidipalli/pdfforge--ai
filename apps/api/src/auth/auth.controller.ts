@@ -1,7 +1,18 @@
-import { Controller, Post, Body, Get, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, Delete, Param, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, RefreshTokenDto, GoogleAuthDto } from './dto/auth.dto';
+import {
+  RegisterDto,
+  LoginDto,
+  RefreshTokenDto,
+  GoogleAuthDto,
+  GithubAuthDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  VerifyEmailDto,
+  TwoFactorVerifyDto,
+  CreateApiKeyDto,
+} from './dto/auth.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/roles.decorator';
 
@@ -30,6 +41,76 @@ export class AuthController {
   @ApiOperation({ summary: 'Authenticate via Google OAuth 2.0' })
   async googleAuth(@Body() dto: GoogleAuthDto) {
     return this.authService.googleAuth(dto.idToken);
+  }
+
+  @Post('github')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Authenticate via GitHub OAuth' })
+  async githubAuth(@Body() dto: GithubAuthDto) {
+    return this.authService.githubAuth(dto.code);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request password reset email token' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password with verification token' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.newPassword);
+  }
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify user email address' })
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto.token);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('2fa/generate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Generate 2FA TOTP secret key and QR code link' })
+  async generate2Fa(@CurrentUser('sub') userId: string) {
+    return this.authService.generate2FaSecret(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('2fa/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify 6-digit TOTP code and activate 2FA' })
+  async verify2Fa(@CurrentUser('sub') userId: string, @Body() dto: TwoFactorVerifyDto) {
+    return this.authService.verify2Fa(userId, dto.code);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('api-keys')
+  @ApiOperation({ summary: 'List all active API keys for authenticated user' })
+  async getApiKeys(@CurrentUser('sub') userId: string) {
+    return this.authService.getUserApiKeys(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('api-keys')
+  @ApiOperation({ summary: 'Generate a new developer API key' })
+  async createApiKey(@CurrentUser('sub') userId: string, @Body() dto: CreateApiKeyDto) {
+    return this.authService.createApiKey(userId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Delete('api-keys/:id')
+  @ApiOperation({ summary: 'Revoke an existing developer API key' })
+  async revokeApiKey(@CurrentUser('sub') userId: string, @Param('id') keyId: string) {
+    return this.authService.revokeApiKey(userId, keyId);
   }
 
   @Post('refresh')

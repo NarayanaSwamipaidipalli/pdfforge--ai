@@ -1,0 +1,102 @@
+# Default production values for PDFForge AI Helm chart
+global:
+  environment: production
+  domain: pdfforge.ai
+
+replicaCount:
+  web: 3
+  api: 5
+  worker: 6
+  llm: 1
+
+image:
+  web:
+    repository: pdfforge/web
+    tag: latest
+    pullPolicy: IfNotPresent
+  api:
+    repository: pdfforge/api-gateway
+    tag: latest
+    pullPolicy: IfNotPresent
+  worker:
+    repository: pdfforge/pdf-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  llm:
+    repository: ollama/ollama
+    tag: latest
+    pullPolicy: IfNotPresent
+
+service:
+  web:
+    type: ClusterIP
+    port: 3000
+  api:
+    type: ClusterIP
+    port: 4000
+  worker:
+    type: ClusterIP
+    port: 8000
+  llm:
+    type: ClusterIP
+    port: 11434
+
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+  hosts:
+    - host: pdfforge.ai
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: api
+        - path: /
+          pathType: Prefix
+          service: web
+  tls:
+    - secretName: pdfforge-tls-cert
+      hosts:
+        - pdfforge.ai
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 30
+  targetCPUUtilizationPercentage: 75
+  targetMemoryUtilizationPercentage: 80
+
+resources:
+  api:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  worker:
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  web:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+env:
+  DATABASE_URL: "postgresql://pdfforge:secure_pass@pdfforge-pg-cluster:5432/pdfforge_db?schema=public"
+  REDIS_URL: "redis://pdfforge-redis-master:6379/0"
+  S3_BUCKET_NAME: "pdfforge-production-files"
+  S3_REGION: "us-east-1"
+  JWT_SECRET: "pdfforge-jwt-production-secret-2026"
+  JWT_REFRESH_SECRET: "pdfforge-refresh-production-secret-2026"

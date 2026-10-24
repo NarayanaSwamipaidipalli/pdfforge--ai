@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdfforge-web
+  namespace: pdfforge-production
+  labels:
+    app.kubernetes.io/name: pdfforge-web
+    app.kubernetes.io/part-of: pdfforge-ai
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: pdfforge-web
+  template:
+    metadata:
+      labels:
+        app: pdfforge-web
+    spec:
+      containers:
+        - name: web
+          image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/pdfforge-web:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: NEXT_PUBLIC_API_URL
+              value: "https://pdfforge.ai"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdfforge-web-service
+  namespace: pdfforge-production
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+  selector:
+    app: pdfforge-web

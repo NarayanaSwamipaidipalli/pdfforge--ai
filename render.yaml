@@ -1,0 +1,66 @@
+services:
+  # Next.js 15 Web Application
+  - type: web
+    name: pdfforge-web
+    env: node
+    plan: standard
+    buildCommand: cd apps/web && npm install && npm run build
+    startCommand: cd apps/web && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        value: https://pdfforge-api.onrender.com
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://pdfforge.onrender.com
+
+  # NestJS 10 API Gateway
+  - type: web
+    name: pdfforge-api
+    env: node
+    plan: standard
+    buildCommand: cd apps/api && npm install && npm run prisma:generate && npm run build
+    startCommand: cd apps/api && npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pdfforge-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: pdfforge-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+
+  # Python FastAPI & Celery Engine
+  - type: web
+    name: pdfforge-worker
+    env: python
+    plan: standard
+    buildCommand: pip install -r services/pdf-worker/requirements.txt
+    startCommand: cd services/pdf-worker && uvicorn app.main:app --host 0.0.0.0 --port 8000
+    envVars:
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: pdfforge-redis
+          property: connectionString
+
+databases:
+  - name: pdfforge-postgres
+    plan: standard
+    postgresMajorVersion: 16
+    databaseName: pdfforge_db
+    user: pdfforge
+
+  - name: pdfforge-redis
+    plan: standard
+    type: redis

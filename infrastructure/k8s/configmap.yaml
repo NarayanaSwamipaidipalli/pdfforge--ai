@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pdfforge-config
+  namespace: pdfforge-production
+data:
+  NODE_ENV: "production"
+  PORT: "4000"
+  FRONTEND_URL: "https://pdfforge.ai"
+  S3_BUCKET_NAME: "pdfforge-enterprise-production"
+  S3_REGION: "us-east-1"
+  PDF_WORKER_URL: "http://pdfforge-worker-service:8000"
+  CELERY_BROKER_URL: "redis://pdfforge-redis-service:6379/0"
+  CELERY_RESULT_BACKEND: "redis://pdfforge-redis-service:6379/0"
+  OLLAMA_BASE_URL: "http://pdfforge-llm-service:11434"

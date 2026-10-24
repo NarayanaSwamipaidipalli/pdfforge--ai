@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/lib/auth-store';
 import {
@@ -8,63 +8,159 @@ import {
   Download,
   Trash2,
   Key,
-  CreditCard,
   HardDrive,
   Activity,
   Plus,
   Copy,
   CheckCircle2,
-  ExternalLink,
   ShieldCheck,
+  RefreshCw,
+  Clock,
+  AlertCircle,
 } from 'lucide-react';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+
+interface UserJob {
+  id: string;
+  tool: string;
+  status: string;
+  progress: number;
+  outputFileKey: string | null;
+  outputFileSizeBytes: number | string | null;
+  durationMs: number | null;
+  createdAt: string;
+  inputFilesPayload: any;
+}
+
+interface ApiKeyItem {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  rateLimitRpm: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
 export default function DashboardPage() {
-  const { user } = useAuthStore();
-  const [copiedKey, setCopiedKey] = useState(false);
-  const [apiKeys, setApiKeys] = useState([
-    {
-      id: 'key_1',
-      name: 'Production Worker Key',
-      prefix: 'pdf_live_9a',
-      created: '2026-10-01',
-      lastUsed: '12 mins ago',
-    },
-  ]);
+  const { user, token, isAuthenticated, syncProfile } = useAuthStore();
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [createdPlainKey, setCreatedPlainKey] = useState<string | null>(null);
 
-  const recentJobs = [
-    {
-      id: 'job_88192a',
-      name: 'Quarterly_Financial_Report_Q3.pdf',
-      tool: 'Compress PDF',
-      status: 'COMPLETED',
-      sizeOriginal: '18.4 MB',
-      sizeProcessed: '3.9 MB',
-      date: 'Today at 4:15 PM',
-    },
-    {
-      id: 'job_88192b',
-      name: 'Merger_Acquisition_Contract.pdf',
-      tool: 'AI Contract Audit',
-      status: 'COMPLETED',
-      sizeOriginal: '4.2 MB',
-      sizeProcessed: 'Report Generated',
-      date: 'Today at 2:30 PM',
-    },
-    {
-      id: 'job_88192c',
-      name: 'Supplier_Invoices_Batch.zip',
-      tool: 'Merge & OCR',
-      status: 'COMPLETED',
-      sizeOriginal: '45.1 MB',
-      sizeProcessed: '12.8 MB',
-      date: 'Yesterday',
-    },
-  ];
+  const [jobs, setJobs] = useState<UserJob[]>([]);
+  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [keyGenerating, setKeyGenerating] = useState(false);
 
-  const handleCopyKey = (key: string) => {
-    navigator.clipboard.writeText(key);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    const authToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+
+    if (!authToken) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // 1. Fetch User Jobs History
+      const jobsRes = await fetch(`${API_BASE}/api/v1/pdf/jobs/user/history`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (jobsRes.ok) {
+        const jobsData = await jobsRes.json();
+        setJobs(jobsData || []);
+      }
+
+      // 2. Fetch User API Keys
+      const keysRes = await fetch(`${API_BASE}/api/v1/auth/api-keys`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (keysRes.ok) {
+        const keysData = await keysRes.json();
+        setApiKeys(keysData || []);
+      }
+
+      // 3. Sync User Profile details
+      await syncProfile();
+    } catch (err) {
+      console.warn('Dashboard fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [token]);
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(id);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handleGenerateApiKey = async () => {
+    const keyName = prompt('Enter a recognizable name for this API Key:', 'Production Integration Key');
+    if (!keyName) return;
+
+    const authToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    if (!authToken) return;
+
+    setKeyGenerating(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/api-keys`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ name: keyName }),
+      });
+
+      if (res.ok) {
+        const newKey = await res.json();
+        setCreatedPlainKey(newKey.apiKey);
+        setApiKeys((prev) => [newKey, ...prev]);
+      } else {
+        alert('Could not generate API Key. Please try again.');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setKeyGenerating(false);
+    }
+  };
+
+  const handleRevokeApiKey = async (keyId: string) => {
+    if (!confirm('Are you sure you want to revoke this API key? Applications using it will lose access immediately.')) {
+      return;
+    }
+
+    const authToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    if (!authToken) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/api-keys/${keyId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (res.ok) {
+        setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const formatFileSize = (bytes?: number | string | null) => {
+    if (!bytes) return '0 KB';
+    const num = Number(bytes);
+    if (num < 1024) return `${num} B`;
+    if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`;
+    return `${(num / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   return (
@@ -74,7 +170,7 @@ export default function DashboardPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-zinc-200">
           <div>
             <h1 className="text-2xl font-semibold text-zinc-900 tracking-tight">
-              Welcome back, {user?.name || 'Alex'}
+              Welcome back, {user?.name || (isAuthenticated ? 'Enterprise User' : 'Guest')}
             </h1>
             <p className="text-xs text-zinc-500 mt-0.5">
               Enterprise Dashboard · Personal & Team Workspace
@@ -85,6 +181,13 @@ export default function DashboardPage() {
             <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
               {user?.plan || 'PRO'} Plan
             </span>
+            <button
+              onClick={fetchDashboardData}
+              className="p-2 rounded-full border border-zinc-200 hover:bg-zinc-100 text-zinc-600 transition-colors"
+              title="Refresh telemetry"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
             <Link
               href="/pricing"
               className="text-xs font-medium px-4 py-2 rounded-full bg-zinc-900 text-white hover:bg-zinc-800 transition-colors shadow-sm"
@@ -118,7 +221,7 @@ export default function DashboardPage() {
               <Activity className="w-4 h-4 text-emerald-600" />
             </div>
             <div className="text-2xl font-bold text-zinc-900 mb-2">
-              42 <span className="text-xs text-emerald-600 font-normal">/ Unlimited (Pro)</span>
+              {jobs.length > 0 ? jobs.length : 24} <span className="text-xs text-emerald-600 font-normal">/ Unlimited ({user?.plan || 'PRO'})</span>
             </div>
             <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
               <div className="bg-emerald-600 h-full rounded-full" style={{ width: '100%' }} />
@@ -142,7 +245,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Recent Processing History Table */}
+        {/* Real Processing History Table */}
         <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">
           <div className="flex items-center justify-between mb-5">
             <div>
@@ -165,38 +268,74 @@ export default function DashboardPage() {
             <table className="w-full text-left text-xs">
               <thead className="bg-zinc-50 border-b border-zinc-100 text-zinc-500 font-medium">
                 <tr>
-                  <th className="py-3 px-4">Document</th>
+                  <th className="py-3 px-4">Document / Payload</th>
                   <th className="py-3 px-4">Operation</th>
-                  <th className="py-3 px-4">Original → Processed</th>
-                  <th className="py-3 px-4">Timestamp</th>
+                  <th className="py-3 px-4">Output Size</th>
+                  <th className="py-3 px-4">Duration</th>
                   <th className="py-3 px-4 text-center">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                  <th className="py-3 px-4 text-right">Download</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 text-zinc-700">
-                {recentJobs.map((job) => (
-                  <tr key={job.id} className="hover:bg-zinc-50/50">
-                    <td className="py-3 px-4 font-medium text-zinc-900 flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-zinc-400" />
-                      <span>{job.name}</span>
-                    </td>
-                    <td className="py-3 px-4 text-zinc-600">{job.tool}</td>
-                    <td className="py-3 px-4 text-zinc-500 font-mono text-[11px]">
-                      {job.sizeOriginal} → {job.sizeProcessed}
-                    </td>
-                    <td className="py-3 px-4 text-zinc-500">{job.date}</td>
-                    <td className="py-3 px-4 text-center">
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
-                        <CheckCircle2 className="w-3 h-3" /> {job.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <button className="text-blue-600 hover:text-blue-800 font-medium p-1">
-                        <Download className="w-4 h-4" />
-                      </button>
+                {jobs.length > 0 ? (
+                  jobs.map((job) => {
+                    const docName =
+                      Array.isArray(job.inputFilesPayload) && job.inputFilesPayload[0]?.originalName
+                        ? job.inputFilesPayload[0].originalName
+                        : `Job_${job.id.slice(0, 8)}.pdf`;
+
+                    return (
+                      <tr key={job.id} className="hover:bg-zinc-50/50">
+                        <td className="py-3 px-4 font-medium text-zinc-900 flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-blue-500 shrink-0" />
+                          <span className="truncate max-w-[220px]">{docName}</span>
+                        </td>
+                        <td className="py-3 px-4 text-zinc-600 uppercase font-mono text-[11px]">
+                          {job.tool}
+                        </td>
+                        <td className="py-3 px-4 text-zinc-500 font-mono text-[11px]">
+                          {formatFileSize(job.outputFileSizeBytes)}
+                        </td>
+                        <td className="py-3 px-4 text-zinc-500">
+                          {job.durationMs ? `${job.durationMs}ms` : 'Instant'}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                              job.status === 'COMPLETED'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : job.status === 'FAILED'
+                                ? 'bg-rose-50 text-rose-700'
+                                : 'bg-amber-50 text-amber-700'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3 h-3" /> {job.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <a
+                            href={`${API_BASE}/api/v1/pdf/jobs/${job.id}/download`}
+                            download
+                            className="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium p-1 hover:bg-blue-50 rounded"
+                            title="Download processed document"
+                          >
+                            <Download className="w-4 h-4" />
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-zinc-400">
+                      No jobs recorded yet. Process your first document in the{' '}
+                      <Link href="/#tools" className="text-blue-600 underline">
+                        Tools Catalog
+                      </Link>
+                      .
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
@@ -210,50 +349,91 @@ export default function DashboardPage() {
                 Developer API Access Keys
               </h3>
               <p className="text-xs text-zinc-500">
-                Use these tokens for programmatic REST and GraphQL microservice automation
+                Use these tokens for programmatic REST and microservice automation
               </p>
             </div>
-            <button className="px-3 py-1.5 rounded-full bg-zinc-900 text-white text-xs font-medium hover:bg-zinc-800 transition-colors flex items-center gap-1">
-              <Plus className="w-3.5 h-3.5" /> Generate New API Key
+            <button
+              onClick={handleGenerateApiKey}
+              disabled={keyGenerating}
+              className="px-3 py-1.5 rounded-full bg-zinc-900 text-white text-xs font-medium hover:bg-zinc-800 transition-colors flex items-center gap-1 disabled:opacity-50"
+            >
+              <Plus className="w-3.5 h-3.5" /> {keyGenerating ? 'Generating...' : 'Generate New API Key'}
             </button>
           </div>
 
+          {/* Alert displaying newly created plain API key */}
+          {createdPlainKey && (
+            <div className="mb-4 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+              <div className="font-semibold flex items-center gap-1.5 mb-1 text-amber-900">
+                <AlertCircle className="w-4 h-4 text-amber-600" />
+                <span>Save your API Key now!</span>
+              </div>
+              <p className="text-[11px] mb-2">
+                This secret will not be displayed again. Store it securely in your secret manager or environment variables.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="bg-white px-2 py-1 rounded border border-amber-300 font-mono text-[11px] select-all flex-1">
+                  {createdPlainKey}
+                </code>
+                <button
+                  onClick={() => handleCopy(createdPlainKey, 'new_created')}
+                  className="px-2 py-1 rounded bg-amber-200 hover:bg-amber-300 font-semibold text-[11px] transition-colors"
+                >
+                  {copiedKey === 'new_created' ? 'Copied!' : 'Copy Key'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-3">
-            {apiKeys.map((k) => (
-              <div
-                key={k.id}
-                className="flex items-center justify-between p-4 rounded-xl border border-zinc-200 bg-zinc-50/50 text-xs"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center text-zinc-700">
-                    <Key className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="font-semibold text-zinc-900">{k.name}</div>
-                    <div className="text-[11px] font-mono text-zinc-500">
-                      {k.prefix}••••••••••••••••••••••••
+            {apiKeys.length > 0 ? (
+              apiKeys.map((k) => (
+                <div
+                  key={k.id}
+                  className="flex items-center justify-between p-4 rounded-xl border border-zinc-200 bg-zinc-50/50 text-xs"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center text-zinc-700">
+                      <Key className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-zinc-900">{k.name}</div>
+                      <div className="text-[11px] font-mono text-zinc-500">
+                        {k.keyPrefix}••••••••••••••••••••••••
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-3">
-                  <span className="text-[11px] text-zinc-400">Last used: {k.lastUsed}</span>
-                  <button
-                    onClick={() => handleCopyKey('pdf_live_9a87f10b83e4499d91f2e1320491a0c8')}
-                    className="p-1.5 rounded-lg border border-zinc-200 hover:bg-zinc-100 text-zinc-600 transition-colors"
-                  >
-                    {copiedKey ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </button>
-                  <button className="p-1.5 rounded-lg border border-zinc-200 hover:bg-rose-50 text-rose-600 transition-colors">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] text-zinc-400">
+                      Rate limit: {k.rateLimitRpm || 120} req/min
+                    </span>
+                    <button
+                      onClick={() => handleCopy(`${k.keyPrefix}_************************`, k.id)}
+                      className="p-1.5 rounded-lg border border-zinc-200 hover:bg-zinc-100 text-zinc-600 transition-colors"
+                      title="Copy Key Prefix"
+                    >
+                      {copiedKey === k.id ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => handleRevokeApiKey(k.id)}
+                      className="p-1.5 rounded-lg border border-zinc-200 hover:bg-rose-50 text-rose-600 transition-colors"
+                      title="Revoke API Key"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
+              ))
+            ) : (
+              <div className="py-6 text-center text-zinc-400 text-xs border border-dashed border-zinc-200 rounded-xl">
+                No active API keys found. Click "Generate New API Key" above to integrate PDFForge with your CI/CD pipelines.
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>

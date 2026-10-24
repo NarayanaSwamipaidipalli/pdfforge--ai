@@ -4,7 +4,9 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
-import { FileCheck2, ArrowRight, ShieldCheck } from 'lucide-react';
+import { FileCheck2, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -13,25 +15,43 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
-    setTimeout(() => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Registration failed. Please try a different email address.');
+      }
+
       setAuth(
         {
-          id: 'usr_new',
-          email,
-          name: name || email.split('@')[0],
-          role: 'USER',
-          plan: 'FREE',
+          id: data.user.id,
+          email: data.user.email,
+          name: data.user.name,
+          role: data.user.role || 'USER',
+          plan: data.user.plan || 'FREE',
         },
-        'mock_jwt_token_new',
+        data.tokens.accessToken,
       );
-      setLoading(false);
+
       router.push('/dashboard');
-    }, 600);
+    } catch (err: any) {
+      setError(err.message || 'Registration request could not be processed.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -58,6 +78,13 @@ export default function RegisterPage() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4">
         <div className="bg-white py-8 px-6 sm:px-10 rounded-3xl border border-zinc-200 shadow-apple space-y-5">
+          {error && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{error}</span>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1">
@@ -97,6 +124,7 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                minLength={8}
                 required
               />
             </div>
@@ -104,16 +132,17 @@ export default function RegisterPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5 disabled:opacity-60"
             >
-              <span>{loading ? 'Creating Account...' : 'Get Started Free'}</span>
+              <span>{loading ? 'Creating account...' : 'Start 14-Day Free Trial'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </form>
 
-          <p className="text-[10px] text-zinc-400 text-center leading-relaxed">
-            By signing up, you agree to our Terms of Service and Privacy Policy. All uploaded files adhere to our Zero-Permanent-Retention policy.
-          </p>
+          <div className="pt-2 text-center text-[10px] text-zinc-400 flex items-center justify-center gap-1">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>GDPR, HIPAA & SOC2 Compliant · No Credit Card Required</span>
+          </div>
         </div>
       </div>
     </div>
