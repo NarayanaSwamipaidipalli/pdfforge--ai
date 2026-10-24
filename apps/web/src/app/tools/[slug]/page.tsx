@@ -226,7 +226,10 @@ export default function ToolPage({ params }: ToolPageProps) {
     setIsProcessing(true);
     setProcessingStep(1);
 
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+    const envApi = process.env.NEXT_PUBLIC_API_URL || '';
+    const API_BASE = envApi
+      ? (envApi.endsWith('/api/v1') ? envApi : `${envApi}/api/v1`)
+      : (typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : 'http://localhost:4000/api/v1');
 
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null;
@@ -276,7 +279,8 @@ export default function ToolPage({ params }: ToolPageProps) {
 
         // Direct S3/MinIO PUT
         setProcessingStep(2);
-        const targetUploadUrl = presign.uploadUrl.replace('http://minio:9000', 'http://localhost:9000');
+        const minioHost = typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? window.location.hostname : 'localhost';
+        const targetUploadUrl = presign.uploadUrl.replace('http://minio:9000', `http://${minioHost}:9000`);
         const uploadRes = await fetch(targetUploadUrl, {
           method: 'PUT',
           headers: { 'Content-Type': mime },

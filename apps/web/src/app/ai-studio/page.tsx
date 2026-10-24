@@ -21,7 +21,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const rawApi = process.env.NEXT_PUBLIC_API_URL || '';
+const API_BASE = (rawApi ? rawApi.replace(/\/api\/v1\/?$/, '') : '') || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:4000');
 
 interface ChatMessage {
   id: string;
@@ -94,7 +95,8 @@ export default function AiStudioPage() {
 
       if (!presignRes.ok) throw new Error('Could not obtain presigned upload credentials');
       const presign = await presignRes.json();
-      const targetUploadUrl = presign.uploadUrl.replace('http://minio:9000', 'http://localhost:9000');
+      const minioHost = typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? window.location.hostname : 'localhost';
+      const targetUploadUrl = presign.uploadUrl.replace('http://minio:9000', `http://${minioHost}:9000`);
 
       // 2. Upload file to S3/MinIO
       const uploadRes = await fetch(targetUploadUrl, {

@@ -15,22 +15,19 @@ async function bootstrap() {
   const logger = new Logger('PDFForge-APIGateway');
   const app = await NestFactory.create(AppModule, {
     cors: {
-      origin: [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        process.env.FRONTEND_URL || 'http://localhost:3000',
-      ],
+      origin: true,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key', 'Accept'],
     },
   });
 
   // Enterprise Security Headers
   app.use(
     helmet({
-      contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+      contentSecurityPolicy: false,
       crossOriginEmbedderPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
 
