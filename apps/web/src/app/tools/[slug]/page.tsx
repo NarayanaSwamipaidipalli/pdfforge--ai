@@ -368,7 +368,7 @@ export default function ToolPage({ params }: ToolPageProps) {
       // 3. Poll Job status until COMPLETED
       setProcessingStep(4);
       let attempts = 0;
-      const maxAttempts = 60; // 45 seconds polling window (60 * 750ms)
+      const maxAttempts = 300; // 5 minutes polling window (300 * 1000ms)
       const pollTimer = setInterval(async () => {
         attempts++;
         try {
@@ -393,7 +393,7 @@ export default function ToolPage({ params }: ToolPageProps) {
           if (attempts >= maxAttempts) {
             clearInterval(pollTimer);
             setIsProcessing(false);
-            setErrorMessage('Operation timed out after 45s. The worker may be handling high volume, please retry shortly.');
+            setErrorMessage('Operation took longer than 5 minutes. The worker is still processing your document in the background; please check back shortly.');
           }
         } catch (pollErr: any) {
           if (attempts >= maxAttempts) {
@@ -402,7 +402,7 @@ export default function ToolPage({ params }: ToolPageProps) {
             setErrorMessage(`Connection error during job polling: ${pollErr?.message || 'Network disconnected'}`);
           }
         }
-      }, 750);
+      }, 1000);
     } catch (err: any) {
       console.error('Backend API pipeline encountered error:', err);
       setIsProcessing(false);

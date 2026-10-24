@@ -20,10 +20,11 @@ logger.setLevel(logging.INFO)
 class ConversionConfig:
     def __init__(self, options: Optional[Dict[str, Any]] = None):
         opts = options or {}
-        self.ocr_enabled: bool = opts.get("ocr_enabled", True)
-        self.ocr_language: str = opts.get("ocr_language", "eng")
-        self.dpi: int = opts.get("dpi", 300)
-        self.chunk_size: int = opts.get("chunk_size", 50)
+        # Only run full OCR if explicitly requested by user (e.g. OCR tool, enableOcr)
+        self.ocr_enabled: bool = bool(opts.get("enableOcr") or opts.get("ocr") or opts.get("ocr_enabled"))
+        self.ocr_language: str = opts.get("ocr_language") or opts.get("ocrLanguage", "eng")
+        self.dpi: int = min(150, int(opts.get("dpi", 150)))
+        self.chunk_size: int = int(opts.get("chunk_size", 50))
         self.preserve_images: bool = opts.get("preserve_images", True)
         self.table_recognition: bool = opts.get("table_recognition", True)
         self.multi_column_support: bool = opts.get("multi_column_support", True)
@@ -103,18 +104,23 @@ def detect_scanned_document(doc: fitz.Document, sample_pages: int = 5) -> Tuple[
     return is_scanned, scanned_pages
 
 
-def ocr_page_to_searchable_doc(page: fitz.Page, lang: str = "eng", dpi: int = 300) -> Optional[fitz.Document]:
+def ocr_page_to_searchable_doc(page: fitz.Page, lang: str = "eng", dpi: int = 150) -> Optional[fitz.Document]:
     """
     Runs Tesseract OCR on a scanned page and returns a single-page PyMuPDF Document
     with invisible searchable text overlay at exact coordinate positions.
     """
     try:
         import pytesseract
+        import gc
         pix = page.get_pixmap(dpi=dpi)
         img_bytes = pix.tobytes("png")
+        del pix
         pil_img = Image.open(io.BytesIO(img_bytes))
         
         pdf_bytes = pytesseract.image_to_pdf_or_hocr(pil_img, extension='pdf', lang=lang)
+        del pil_img
+        del img_bytes
+        gc.collect()
         if pdf_bytes:
             return fitz.open("pdf", pdf_bytes)
     except Exception as e:
@@ -131,13 +137,19 @@ def preprocess_pdf_with_ocr_if_needed(input_path: str, config: ConversionConfig)
         return input_path
         
     doc = fitz.open(input_path)
+    # Don't run automatic OCR on massive documents (> 25 pages) to prevent timeouts
+    if len(doc) > 25:
+        doc.close()
+        logger.info(f"Skipping OCR enhancement on {len(doc)}-page document to maintain fast conversion.")
+        return input_path
+
     is_scanned, scanned_indices = detect_scanned_document(doc)
     
     if not is_scanned:
         doc.close()
         return input_path
         
-    logger.info(f"Detected {len(scanned_indices)} scanned page(s). Running OCR enhancement...")
+    logger.info(f"Detected {len(scanned_indices)} scanned page(s). Running OCR enhancement at {config.dpi} DPI...")
     ocr_doc = fitz.open()
     
     for i in range(len(doc)):
