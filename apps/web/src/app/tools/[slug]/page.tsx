@@ -213,19 +213,6 @@ export default function ToolPage({ params }: ToolPageProps) {
     return 'pdf';
   };
 
-  const fallbackToLocalBlob = () => {
-    if (files.length === 0) return;
-    const file = files[0];
-    const ext = getOutputExtension();
-    const baseName = file.name.replace(/\.[^/.]+$/, '');
-    const blob = new Blob([file], { type: file.type || 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    setDownloadUrl(url);
-    setDownloadFileName(`pdfforge_${tool.slug}_${baseName}.${ext}`);
-    setIsProcessing(false);
-    setIsCompleted(true);
-  };
-
   const handleExecuteTool = async () => {
     if (files.length === 0) return;
     setErrorMessage(null);
@@ -367,6 +354,7 @@ export default function ToolPage({ params }: ToolPageProps) {
       // 3. Poll Job status until COMPLETED
       setProcessingStep(4);
       let attempts = 0;
+      const maxAttempts = 60; // 45 seconds polling window (60 * 750ms)
       const pollTimer = setInterval(async () => {
         attempts++;
         try {
@@ -375,7 +363,7 @@ export default function ToolPage({ params }: ToolPageProps) {
           });
           if (pollRes.ok) {
             const jobStatus = await pollRes.json();
-            if (jobStatus.status === 'COMPLETED' || attempts >= 20) {
+            if (jobStatus.status === 'COMPLETED') {
               clearInterval(pollTimer);
               const dlUrl = `${API_BASE}/pdf/jobs/${jobId}/download`;
               setDownloadUrl(dlUrl);
@@ -384,30 +372,27 @@ export default function ToolPage({ params }: ToolPageProps) {
               setIsCompleted(true);
             } else if (jobStatus.status === 'FAILED') {
               clearInterval(pollTimer);
-              fallbackToLocalBlob();
+              setIsProcessing(false);
+              setErrorMessage(jobStatus.errorMessage || 'PDF processing operation failed in worker engine. Please check parameters.');
             }
           }
-        } catch {
-          if (attempts >= 10) {
+          if (attempts >= maxAttempts) {
             clearInterval(pollTimer);
-            fallbackToLocalBlob();
+            setIsProcessing(false);
+            setErrorMessage('Operation timed out after 45s. The worker may be handling high volume, please retry shortly.');
+          }
+        } catch (pollErr: any) {
+          if (attempts >= maxAttempts) {
+            clearInterval(pollTimer);
+            setIsProcessing(false);
+            setErrorMessage(`Connection error during job polling: ${pollErr?.message || 'Network disconnected'}`);
           }
         }
       }, 750);
     } catch (err: any) {
-      console.warn('Backend API pipeline encountered error, activating client fallback:', err);
-      setTimeout(() => {
-        setProcessingStep(2);
-        setTimeout(() => {
-          setProcessingStep(3);
-          setTimeout(() => {
-            setProcessingStep(4);
-            setTimeout(() => {
-              fallbackToLocalBlob();
-            }, 600);
-          }, 800);
-        }, 600);
-      }, 500);
+      console.error('Backend API pipeline encountered error:', err);
+      setIsProcessing(false);
+      setErrorMessage(err?.message || 'Document processing request failed. Please check backend connection.');
     }
   };
 

@@ -76,6 +76,10 @@ async def dispatch_job(payload: ProcessJobRequest, background_tasks: BackgroundT
 
 from fastapi.responses import Response
 from app.processors.invoice_generator import generate_invoice_pdf
+from app.celery_app import get_s3_client
+from app.ai import document_intelligence
+import tempfile
+import os
 
 class GenerateInvoiceRequest(BaseModel):
     invoiceNumber: Optional[str] = None
@@ -106,3 +110,151 @@ async def generate_invoice_endpoint(payload: GenerateInvoiceRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Invoice generation failed: {str(e)}")
+
+def download_temp_s3_file(s3_key: str) -> str:
+    s3 = get_s3_client()
+    suffix = os.path.splitext(s3_key)[1] or ".pdf"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp_path = tmp.name
+    tmp.close()
+    s3.download_file(settings.S3_BUCKET_NAME, s3_key, tmp_path)
+    return tmp_path
+
+class AiBaseRequest(BaseModel):
+    s3Key: Optional[str] = None
+    localPath: Optional[str] = None
+
+class AiSummarizeRequest(AiBaseRequest):
+    focusTopics: Optional[List[str]] = None
+    targetLength: Optional[str] = "balanced"
+
+class AiChatRequest(AiBaseRequest):
+    question: str
+
+class AiExtractInvoiceRequest(AiBaseRequest):
+    pass
+
+class AiAnalyzeContractRequest(AiBaseRequest):
+    pass
+
+class AiExtractTextRequest(AiBaseRequest):
+    pass
+
+@app.post("/api/v1/ai/summarize")
+async def ai_summarize_endpoint(payload: AiSummarizeRequest):
+    path_to_clean = None
+    try:
+        if payload.s3Key:
+            local_path = download_temp_s3_file(payload.s3Key)
+            path_to_clean = local_path
+        elif payload.localPath and os.path.exists(payload.localPath):
+            local_path = payload.localPath
+        else:
+            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
+            
+        result = document_intelligence.summarize_document(
+            local_path,
+            focus_topics=payload.focusTopics,
+            target_length=payload.targetLength or "balanced"
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI Summarization failed: {str(e)}")
+    finally:
+        if path_to_clean and os.path.exists(path_to_clean):
+            try:
+                os.remove(path_to_clean)
+            except Exception:
+                pass
+
+@app.post("/api/v1/ai/chat")
+async def ai_chat_endpoint(payload: AiChatRequest):
+    path_to_clean = None
+    try:
+        if payload.s3Key:
+            local_path = download_temp_s3_file(payload.s3Key)
+            path_to_clean = local_path
+        elif payload.localPath and os.path.exists(payload.localPath):
+            local_path = payload.localPath
+        else:
+            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
+            
+        result = document_intelligence.chat_with_document(local_path, payload.question)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI Chat failed: {str(e)}")
+    finally:
+        if path_to_clean and os.path.exists(path_to_clean):
+            try:
+                os.remove(path_to_clean)
+            except Exception:
+                pass
+
+@app.post("/api/v1/ai/extract-invoice")
+async def ai_extract_invoice_endpoint(payload: AiExtractInvoiceRequest):
+    path_to_clean = None
+    try:
+        if payload.s3Key:
+            local_path = download_temp_s3_file(payload.s3Key)
+            path_to_clean = local_path
+        elif payload.localPath and os.path.exists(payload.localPath):
+            local_path = payload.localPath
+        else:
+            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
+            
+        result = document_intelligence.extract_invoice_data(local_path)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Invoice extraction failed: {str(e)}")
+    finally:
+        if path_to_clean and os.path.exists(path_to_clean):
+            try:
+                os.remove(path_to_clean)
+            except Exception:
+                pass
+
+@app.post("/api/v1/ai/analyze-contract")
+async def ai_analyze_contract_endpoint(payload: AiAnalyzeContractRequest):
+    path_to_clean = None
+    try:
+        if payload.s3Key:
+            local_path = download_temp_s3_file(payload.s3Key)
+            path_to_clean = local_path
+        elif payload.localPath and os.path.exists(payload.localPath):
+            local_path = payload.localPath
+        else:
+            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
+            
+        result = document_intelligence.analyze_contract_data(local_path)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Contract analysis failed: {str(e)}")
+    finally:
+        if path_to_clean and os.path.exists(path_to_clean):
+            try:
+                os.remove(path_to_clean)
+            except Exception:
+                pass
+
+@app.post("/api/v1/ai/extract-text")
+async def ai_extract_text_endpoint(payload: AiExtractTextRequest):
+    path_to_clean = None
+    try:
+        if payload.s3Key:
+            local_path = download_temp_s3_file(payload.s3Key)
+            path_to_clean = local_path
+        elif payload.localPath and os.path.exists(payload.localPath):
+            local_path = payload.localPath
+        else:
+            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
+            
+        result = document_intelligence.extract_tables_and_text(local_path)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Text extraction failed: {str(e)}")
+    finally:
+        if path_to_clean and os.path.exists(path_to_clean):
+            try:
+                os.remove(path_to_clean)
+            except Exception:
+                pass

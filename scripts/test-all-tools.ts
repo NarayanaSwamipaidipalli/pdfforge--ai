@@ -188,8 +188,71 @@ async function testSuite() {
   // Test 7: PDF to Excel (.csv)
   await runJobAndDownload(token, 'pdf-to-excel', [file1], {}, '', 'csv');
 
+  // Test 8: Digital Signature
+  await runJobAndDownload(token, 'sign', [file1], { signerName: 'Chief Legal Officer', reason: 'Verification' }, '%PDF-', 'application/pdf');
+
+  // Test 9: Redact PDF
+  await runJobAndDownload(token, 'redact', [file1], { keywords: 'CONFIDENTIAL, TERMS' }, '%PDF-', 'application/pdf');
+
+  // Test 10: Split PDF
+  await runJobAndDownload(token, 'split', [file1], { pageRange: '1' }, '%PDF-', 'application/pdf');
+
+  // Test 11: Crop PDF
+  await runJobAndDownload(token, 'crop', [file1], { top: 40, bottom: 40, left: 40, right: 40 }, '%PDF-', 'application/pdf');
+
+  // Test 12: Add Page Numbers
+  await runJobAndDownload(token, 'page-numbers', [file1], { formatStr: 'Page {page} of {total}' }, '%PDF-', 'application/pdf');
+
+  // Test 13: PDF to PowerPoint (.pptx)
+  await runJobAndDownload(token, 'pdf-to-ppt', [file1], {}, 'PK', 'presentationml');
+
+  // Test 14: Edit Metadata
+  await runJobAndDownload(token, 'metadata', [file1], { title: 'Enterprise Test Title', author: 'PDFForge Test' }, '%PDF-', 'application/pdf');
+
+  console.log('\n3. Testing Real AI Document Intelligence Endpoints:');
+
+  // AI 1: Real Document Summarization
+  const sumRes = await fetch(`${API_BASE}/ai/summarize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fileId: file1, length: 'detailed' }),
+  });
+  if (!sumRes.ok) throw new Error(`AI Summarize failed: ${await sumRes.text()}`);
+  const sumData = await sumRes.json() as any;
+  console.log(`   ✔ AI SUMMARIZE: Extracted summary (${sumData.summary.length} chars, provider: ${sumData.provider})`);
+
+  // AI 2: Real Invoice Extraction
+  const invRes = await fetch(`${API_BASE}/ai/extract/invoice`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fileId: file1 }),
+  });
+  if (!invRes.ok) throw new Error(`AI Invoice extraction failed: ${await invRes.text()}`);
+  const invData = await invRes.json() as any;
+  console.log(`   ✔ AI INVOICE EXTRACTION: Extracted invoice (${invData.documentType}, currency: ${invData.extractedData.currency}, confidence: ${invData.confidenceScore})`);
+
+  // AI 3: Real Contract Analysis Radar
+  const contractRes = await fetch(`${API_BASE}/ai/analyze/contract`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fileId: file1 }),
+  });
+  if (!contractRes.ok) throw new Error(`AI Contract analysis failed: ${await contractRes.text()}`);
+  const contractData = await contractRes.json() as any;
+  console.log(`   ✔ AI CONTRACT AUDIT: Analyzed risk (${contractData.documentType}, riskScore: ${contractData.riskScore}, riskLevel: ${contractData.riskLevel}, clauses: ${contractData.keyClauses?.length})`);
+
+  // AI 4: Real Document RAG Q&A
+  const chatRes = await fetch(`${API_BASE}/ai/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fileId: file1, question: 'What are the terms and conditions?' }),
+  });
+  if (!chatRes.ok) throw new Error(`AI Chat failed: ${await chatRes.text()}`);
+  const chatData = await chatRes.json() as any;
+  console.log(`   ✔ AI DOCUMENT CHAT (RAG): Answered with citations (citations count: ${chatData.citations?.length}, provider: ${chatData.provider})`);
+
   console.log('\n=============================================================');
-  console.log('🎉 ALL TESTED TOOLS PASSED END-TO-END BACKEND & STREAMING DOWNLOAD');
+  console.log('🎉 ALL TESTED TOOLS & AI INTELLIGENCE SERVICES PASSED PRODUCTION VALIDATION');
   console.log('=============================================================\n');
 }
 

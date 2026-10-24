@@ -75,7 +75,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
         # Route tool operation with comprehensive slug and ID mapping
         t = str(tool).lower().replace("_", "-")
         
-        if t in ["merge", "merge-pdf"]:
+        if t in ["merge", "merge-pdf", "combine", "combine-pdf"]:
             basic_tools.merge_pdfs(input_paths, output_path)
         elif t in ["split", "split-pdf"]:
             pages = parameters.get("pages")
@@ -91,11 +91,11 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 except Exception:
                     pages = None
             basic_tools.split_pdf(input_paths[0], output_path, pages)
-        elif t in ["compress", "compress-pdf"]:
+        elif t in ["compress", "compress-pdf", "batch", "batch-processing"]:
             basic_tools.compress_pdf(input_paths[0], output_path, parameters.get("compressionLevel", "medium"))
         elif t in ["rotate", "rotate-pdf"]:
             basic_tools.rotate_pdf(input_paths[0], output_path, int(parameters.get("rotationDegrees", 90)))
-        elif t in ["delete-pages", "delete_pages", "delete"]:
+        elif t in ["delete-pages", "delete-pdf-pages", "delete_pages", "delete"]:
             pages_to_del = parameters.get("pagesToDelete", [])
             if not pages_to_del and parameters.get("deletePages"):
                 try:
@@ -103,7 +103,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 except Exception:
                     pages_to_del = []
             basic_tools.delete_pages(input_paths[0], output_path, pages_to_del)
-        elif t in ["extract-pages", "extract_pages", "extract"]:
+        elif t in ["extract-pages", "extract-pdf-pages", "extract_pages", "extract"]:
             pages_to_ext = parameters.get("pagesToExtract", [])
             if not pages_to_ext and parameters.get("extractPages"):
                 try:
@@ -113,7 +113,31 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
             basic_tools.extract_pages(input_paths[0], output_path, pages_to_ext)
         elif t in ["reorder", "reorder-pages", "reorder_pages"]:
             basic_tools.reorder_pages(input_paths[0], output_path, parameters.get("newOrder", []))
-        elif t in ["watermark", "pdf-watermark"]:
+        elif t in ["organize", "organize-pages", "organize-pdf-pages"]:
+            basic_tools.organize_pages(
+                input_paths[0],
+                output_path,
+                new_order=parameters.get("newOrder"),
+                pages_to_delete=parameters.get("pagesToDelete"),
+                rotations=parameters.get("rotations")
+            )
+        elif t in ["crop", "crop-pdf", "crop_pdf"]:
+            basic_tools.crop_pdf(
+                input_paths[0],
+                output_path,
+                top=float(parameters.get("top", 36)),
+                bottom=float(parameters.get("bottom", 36)),
+                left=float(parameters.get("left", 36)),
+                right=float(parameters.get("right", 36))
+            )
+        elif t in ["page-numbers", "add-page-numbers", "page_numbers", "numbers"]:
+            basic_tools.add_page_numbers(
+                input_paths[0],
+                output_path,
+                format_str=parameters.get("formatStr", "Page {page} of {total}"),
+                position=parameters.get("position", "bottom-center")
+            )
+        elif t in ["watermark", "pdf-watermark", "watermark-pdf"]:
             opacity = float(parameters.get("watermarkOpacity", 0.3))
             if opacity > 1.0:
                 opacity = opacity / 100.0
@@ -127,10 +151,20 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
             basic_tools.encrypt_pdf(input_paths[0], output_path, str(parameters.get("password", "123456")))
         elif t in ["decrypt", "unlock", "unlock-pdf", "pdf-password-removal"]:
             basic_tools.decrypt_pdf(input_paths[0], output_path, str(parameters.get("password", "")))
-        elif t in ["pdf-to-images", "pdf_to_images", "pdf-to-jpg", "pdf_to_jpg"]:
+        elif t in ["pdf-to-images", "pdf_to_images", "pdf-to-jpg", "pdf_to_jpg", "pdf-to-image"]:
             img_files = conversions.pdf_to_images(input_paths[0], work_dir)
-            output_file_name = os.path.basename(img_files[0]) if img_files else "pages.png"
-            output_path = img_files[0] if img_files else output_path
+            if len(img_files) > 1:
+                import zipfile
+                zip_name = f"result_{job_id}.zip"
+                zip_path = os.path.join(work_dir, zip_name)
+                with zipfile.ZipFile(zip_path, "w") as zipf:
+                    for f in img_files:
+                        zipf.write(f, os.path.basename(f))
+                output_file_name = zip_name
+                output_path = zip_path
+            elif img_files:
+                output_file_name = os.path.basename(img_files[0])
+                output_path = img_files[0]
         elif t in ["images-to-pdf", "images_to_pdf", "image-to-pdf", "jpg-to-pdf", "jpg_to_pdf"]:
             conversions.images_to_pdf(input_paths, output_path)
         elif t in ["pdf-to-word", "pdf_to_word", "pdf-to-docx"]:
@@ -141,6 +175,12 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
             output_file_name = f"result_{job_id}.csv"
             output_path = os.path.join(work_dir, output_file_name)
             conversions.pdf_to_excel(input_paths[0], output_path)
+        elif t in ["pdf-to-ppt", "pdf_to_ppt", "pdf-to-powerpoint"]:
+            output_file_name = f"result_{job_id}.pptx"
+            output_path = os.path.join(work_dir, output_file_name)
+            conversions.pdf_to_ppt(input_paths[0], output_path)
+        elif t in ["html-to-pdf", "html_to_pdf"]:
+            conversions.html_to_pdf(input_paths[0], output_path)
         elif t in ["word-to-pdf", "excel-to-pdf", "ppt-to-pdf", "office-to-pdf"]:
             res = conversions.office_to_pdf(input_paths[0], work_dir)
             if res and os.path.exists(res):
@@ -148,9 +188,9 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 output_file_name = os.path.basename(res)
         elif t in ["ocr", "ocr-pdf"]:
             advanced_tools.ocr_pdf(input_paths[0], output_path, parameters.get("ocrLanguage", "eng"))
-        elif t in ["repair", "repair-pdf"]:
+        elif t in ["repair", "repair-pdf", "pdf-repair"]:
             advanced_tools.repair_pdf(input_paths[0], output_path)
-        elif t in ["metadata", "pdf-metadata-editor"]:
+        elif t in ["metadata", "pdf-metadata-editor", "metadata-editor"]:
             advanced_tools.edit_metadata(
                 input_paths[0],
                 output_path,
@@ -159,7 +199,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 subject=parameters.get("subject"),
                 keywords=parameters.get("keywords")
             )
-        elif t in ["sign", "signature", "digital-signatures", "digital_signature"]:
+        elif t in ["sign", "signature", "sign-pdf", "digital-signatures", "digital_signature"]:
             advanced_tools.apply_digital_signature(
                 input_paths[0],
                 output_path,
@@ -202,9 +242,13 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
             mime_map = {
                 ".pdf": "application/pdf",
                 ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 ".csv": "text/csv",
                 ".png": "image/png",
                 ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".zip": "application/zip",
             }
             _, out_ext = os.path.splitext(output_file_name.lower())
             content_type = mime_map.get(out_ext, "application/pdf")
@@ -219,7 +263,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
         
         # Notify API Gateway via callback
         if callback_url:
-            cb_url = callback_url.replace("http://localhost:4000", "http://api-gateway:4000")
+            cb_url = callback_url.replace("http://localhost:4000", "http://api-gateway:4000").replace("http://127.0.0.1:4000", "http://api-gateway:4000")
             try:
                 httpx.post(
                     cb_url,

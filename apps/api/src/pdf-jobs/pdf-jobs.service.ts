@@ -121,13 +121,35 @@ export class PdfJobsService {
     let ext = 'pdf';
     let defaultType = 'application/pdf';
 
-    if (t.includes('word') || t.includes('docx')) {
+    const keyExt = job.outputFileKey.split('.').pop()?.toLowerCase();
+    if (keyExt && ['pdf', 'docx', 'xlsx', 'csv', 'pptx', 'png', 'jpg', 'zip'].includes(keyExt)) {
+      ext = keyExt;
+      const typeMap: Record<string, string> = {
+        pdf: 'application/pdf',
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        csv: 'text/csv',
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        zip: 'application/zip',
+      };
+      if (typeMap[keyExt]) {
+        defaultType = typeMap[keyExt];
+      }
+    } else if (t.includes('word') || t.includes('docx')) {
       ext = 'docx';
       defaultType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    } else if (t.includes('excel') || t.includes('xlsx') || t.includes('csv')) {
+    } else if (t.includes('ppt') || t.includes('powerpoint')) {
+      ext = 'pptx';
+      defaultType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    } else if (t.includes('excel') || t.includes('xlsx')) {
+      ext = 'xlsx';
+      defaultType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    } else if (t.includes('csv')) {
       ext = 'csv';
       defaultType = 'text/csv';
-    } else if (t.includes('jpg') || t.includes('images')) {
+    } else if (t.includes('jpg') || t.includes('images') || t.includes('image')) {
       ext = 'png';
       defaultType = 'image/png';
     }
@@ -214,6 +236,11 @@ export class PdfJobsService {
         data: { status: 'PROCESSING', startedAt: new Date(), progress: 25 },
       });
 
+      const internalApiUrl = this.configService.get<string>(
+        'API_GATEWAY_INTERNAL_URL',
+        process.env.NODE_ENV === 'production' ? 'http://api-gateway:4000' : 'http://localhost:4000',
+      );
+
       // Send payload to Python worker FastAPI endpoint
       await axios.post(
         `${this.workerUrl}/api/v1/jobs/process`,
@@ -226,7 +253,7 @@ export class PdfJobsService {
             s3Key: f.storedKey,
           })),
           parameters,
-          callbackUrl: `http://localhost:4000/api/v1/pdf/jobs/callback`,
+          callbackUrl: `${internalApiUrl}/api/v1/pdf/jobs/callback`,
         },
         { timeout: 10000 },
       );

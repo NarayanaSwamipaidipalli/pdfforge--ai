@@ -69,28 +69,51 @@ export default function AiStudioPage() {
 
     setUploading(true);
     try {
+      const arrayBuffer = await file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const checksumSha256 = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
       // 1. Get presigned upload URL
-      const presignRes = await fetch(`${API_BASE}/api/v1/files/upload/presign`, {
+      const presignRes = await fetch(`${API_BASE}/api/v1/files/presign-upload`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
-          originalName: file.name,
+          fileName: file.name,
           mimeType: file.type || 'application/pdf',
-          sizeBytes: file.size,
+          fileSizeBytes: file.size,
+          checksumSha256,
         }),
       });
 
       if (!presignRes.ok) throw new Error('Could not obtain presigned upload credentials');
-      const { uploadUrl, fileId } = await presignRes.json();
+      const presign = await presignRes.json();
+      const targetUploadUrl = presign.uploadUrl.replace('http://minio:9000', 'http://localhost:9000');
 
       // 2. Upload file to S3/MinIO
-      const uploadRes = await fetch(uploadUrl, {
+      const uploadRes = await fetch(targetUploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': file.type || 'application/pdf' },
         body: file,
       });
 
       if (!uploadRes.ok) throw new Error('Failed to upload document binary to storage');
+
+      // 3. Confirm upload
+      const confirmRes = await fetch(`${API_BASE}/api/v1/files/confirm-upload`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ fileId: presign.fileId }),
+      });
+
+      const confirmed = confirmRes.ok ? await confirmRes.json() : null;
+      const fileId = confirmed?.file?.id || presign.fileId;
 
       setActiveFileId(fileId);
       setActiveDocument(file.name);

@@ -1,13 +1,13 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand, CreateBucketCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PrismaService } from '../prisma/prisma.service';
 import { PresignUploadDto } from './dto/file.dto';
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
-export class FilesService {
+export class FilesService implements OnModuleInit {
   private readonly logger = new Logger(FilesService.name);
   private readonly s3Client: S3Client;
   private readonly presignS3Client: S3Client;
@@ -48,6 +48,21 @@ export class FilesService {
         secretAccessKey,
       },
     });
+  }
+
+  async onModuleInit() {
+    try {
+      await this.s3Client.send(new HeadBucketCommand({ Bucket: this.bucketName }));
+    } catch (err: any) {
+      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+        try {
+          await this.s3Client.send(new CreateBucketCommand({ Bucket: this.bucketName }));
+          this.logger.log(`Created default S3 bucket: ${this.bucketName}`);
+        } catch (createErr) {
+          this.logger.warn(`Could not create bucket ${this.bucketName}: ${(createErr as Error).message}`);
+        }
+      }
+    }
   }
 
   async generatePresignedUpload(dto: PresignUploadDto, userId?: string) {

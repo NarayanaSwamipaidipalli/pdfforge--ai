@@ -92,6 +92,8 @@ model User {
   auditLogs        AuditLog[]
   subscriptions    Subscription[]
   aiConversations  AiConversation[]
+  invoices         Invoice[]
+  aiJobs           AiJob[]
 
   @@index([email])
   @@index([plan])
@@ -198,6 +200,7 @@ model FileRecord {
   organization    Organization?  @relation(fields: [orgId], references: [id], onDelete: SetNull)
   embeddings      AiEmbedding[]
   aiConversations AiConversation[]
+  aiJobs          AiJob[]
 
   @@index([userId])
   @@index([orgId])
@@ -330,4 +333,41 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model Invoice {
+  id            String   @id @default(uuid())
+  userId        String?
+  orgId         String?
+  invoiceNumber String   @unique
+  amount        Float
+  currency      String   @default("USD")
+  status        String   @default("PAID")
+  pdfKey        String?
+  createdAt     DateTime @default(now())
+
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([invoiceNumber])
+  @@map("invoices")
+}
+
+model AiJob {
+  id             String    @id @default(uuid())
+  userId         String?
+  fileId         String
+  jobType        String    // "SUMMARIZE" | "INVOICE" | "CONTRACT" | "CHAT" | "TRANSLATE"
+  status         JobStatus @default(COMPLETED)
+  result         Json?
+  tokensUsed     Int       @default(0)
+  createdAt      DateTime  @default(now())
+
+  user           User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  file           FileRecord  @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([fileId])
+  @@index([jobType])
+  @@map("ai_jobs")
 }
