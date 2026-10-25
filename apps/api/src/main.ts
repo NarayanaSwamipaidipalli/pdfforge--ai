@@ -58,6 +58,7 @@ async function bootstrap() {
     .addTag('Billing & Subscriptions')
     .addTag('Organizations & Workspaces')
     .addTag('Admin & Observability')
+    .addTag('System & Health')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

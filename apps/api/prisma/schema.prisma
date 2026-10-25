@@ -71,9 +71,15 @@ model User {
   globalRole       GlobalRole   @default(USER)
   plan             PlanTier     @default(FREE)
   isEmailVerified  Boolean      @default(false)
+  emailVerificationToken     String?
+  emailVerificationExpiresAt DateTime?
+  passwordResetToken         String?
+  passwordResetExpiresAt     DateTime?
   twoFactorEnabled Boolean      @default(false)
   twoFactorSecret  String?
   refreshTokenHash String?
+  isBanned         Boolean      @default(false)
+  banReason        String?
   
   // Storage & Quotas
   conversionsToday Int          @default(0)
@@ -94,6 +100,8 @@ model User {
   aiConversations  AiConversation[]
   invoices         Invoice[]
   aiJobs           AiJob[]
+  sessions         UserSession[]
+  payments         Payment[]
 
   @@index([email])
   @@index([plan])
@@ -226,6 +234,9 @@ model ProcessingJob {
   errorMessage        String?
   durationMs          Int?
   workerInstanceId    String?
+  retryCount          Int           @default(0)
+  maxRetries          Int           @default(3)
+  chunkedUpload       Boolean       @default(false)
 
   createdAt           DateTime      @default(now())
   startedAt           DateTime?
@@ -370,4 +381,58 @@ model AiJob {
   @@index([fileId])
   @@index([jobType])
   @@map("ai_jobs")
+}
+
+model UserSession {
+  id           String   @id @default(uuid())
+  userId       String
+  tokenHash    String   @unique
+  userAgent    String?
+  ipAddress    String?
+  lastActiveAt DateTime @default(now())
+  expiresAt    DateTime
+  isRevoked    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("user_sessions")
+}
+
+model Payment {
+  id                String   @id @default(uuid())
+  userId            String?
+  subscriptionId    String?
+  provider          String   // "stripe" | "razorpay" | "paypal"
+  providerPaymentId String?  @unique
+  amount            Float
+  currency          String   @default("USD")
+  status            String   @default("COMPLETED") // "COMPLETED" | "PENDING" | "FAILED" | "REFUNDED"
+  receiptUrl        String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  user              User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([providerPaymentId])
+  @@map("payments")
+}
+
+model Coupon {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  discountPercent Float?    // e.g. 20 for 20% off
+  discountAmount  Float?    // e.g. 10 for $10 off
+  currency        String    @default("USD")
+  maxUses         Int       @default(100)
+  usedCount       Int       @default(0)
+  isActive        Boolean   @default(true)
+  validUntil      DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([code])
+  @@map("coupons")
 }

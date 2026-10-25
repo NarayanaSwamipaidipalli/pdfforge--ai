@@ -70,13 +70,17 @@ export class AuthService {
     };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, ipAddress = '127.0.0.1', userAgent = 'Web Browser') {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
 
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException('Invalid email or password');
+    }
+
+    if (user.isBanned) {
+      throw new UnauthorizedException(`Account suspended: ${user.banReason || 'Please contact customer support.'}`);
     }
 
     const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
@@ -86,6 +90,22 @@ export class AuthService {
 
     const tokens = await this.generateTokens(user.id, user.email, user.globalRole);
     await this.updateRefreshToken(user.id, tokens.refreshToken);
+
+    // Track active user session
+    try {
+      const tokenHash = crypto.createHash('sha256').update(tokens.refreshToken).digest('hex');
+      await this.prisma.userSession.create({
+        data: {
+          userId: user.id,
+          tokenHash,
+          ipAddress,
+          userAgent,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
+    } catch {
+      // Ignore session tracking failure if any
+    }
 
     return {
       user: {
@@ -407,6 +427,54 @@ export class AuthService {
 
     const { passwordHash, refreshTokenHash, twoFactorSecret, ...profile } = user;
     return profile;
+  }
+
+  async getSessions(userId: string) {
+    return this.prisma.userSession.findMany({
+      where: { userId, isRevoked: false, expiresAt: { gt: new Date() } },
+      orderBy: { lastActiveAt: 'desc' },
+      select: {
+        id: true,
+        userAgent: true,
+        ipAddress: true,
+        lastActiveAt: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  async revokeSession(userId: string, sessionId: string) {
+    await this.prisma.userSession.updateMany({
+      where: { id: sessionId, userId },
+      data: { isRevoked: true },
+    });
+    return { success: true, message: 'Session revoked successfully' };
+  }
+
+  async revokeAllOtherSessions(userId: string) {
+    await this.prisma.userSession.updateMany({
+      where: { userId, isRevoked: false },
+      data: { isRevoked: true },
+    });
+    return { success: true, message: 'All other sessions have been revoked' };
+  }
+
+  async changePassword(userId: string, oldPass: string, newPass: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.passwordHash) {
+      throw new BadRequestException('User does not have a local password set');
+    }
+    const isMatch = await bcrypt.compare(oldPass, user.passwordHash);
+    if (!isMatch) {
+      throw new BadRequestException('Current password does not match');
+    }
+    const salt = await bcrypt.genSalt(12);
+    const passwordHash = await bcrypt.hash(newPass, salt);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash, refreshTokenHash: null },
+    });
+    return { success: true, message: 'Password changed successfully. Please log in again.' };
   }
 
   private async generateTokens(userId: string, email: string, role: string) {

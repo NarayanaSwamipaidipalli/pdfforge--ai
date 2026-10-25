@@ -94,3 +94,22 @@ export class CreateApiKeyDto {
   @IsOptional()
   permissions?: string[];
 }
+
+export class ChangePasswordDto {
+  @ApiProperty({ example: 'OldPassword123!' })
+  @IsString()
+  @IsNotEmpty()
+  oldPassword: string;
+
+  @ApiProperty({ example: 'NewSecurePassword123!' })
+  @IsString()
+  @MinLength(8)
+  newPassword: string;
+}
+
+export class RevokeSessionDto {
+  @ApiProperty({ example: 'session-uuid-1234' })
+  @IsString()
+  @IsNotEmpty()
+  sessionId: string;
+}

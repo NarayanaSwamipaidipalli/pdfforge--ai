@@ -216,6 +216,44 @@ export class PdfJobsService {
     });
   }
 
+  async retryJob(jobId: string) {
+    const job = await this.prisma.processingJob.findUnique({ where: { id: jobId } });
+    if (!job) throw new NotFoundException('Job not found');
+
+    if (job.status === 'PROCESSING') {
+      throw new BadRequestException('Job is currently being processed');
+    }
+
+    const updated = await this.prisma.processingJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'QUEUED',
+        progress: 10,
+        errorMessage: null,
+        retryCount: { increment: 1 },
+      },
+    });
+
+    const filesPayload = (job.inputFilesPayload as any[]) || [];
+    const files = filesPayload.map((f: any) => ({
+      id: f.fileId,
+      originalName: f.name,
+      storedKey: f.key,
+    }));
+
+    this.dispatchToWorker(job.id, job.tool, files, (job.parametersPayload as any) || {}).catch((err) => {
+      this.logger.error(`Error re-dispatching retry job ${job.id}: ${err.message}`);
+    });
+
+    return {
+      success: true,
+      jobId: updated.id,
+      status: updated.status,
+      retryCount: updated.retryCount,
+      message: 'Job re-queued successfully for processing',
+    };
+  }
+
   async getUserJobs(userId: string, limit = 20) {
     return this.prisma.processingJob.findMany({
       where: { userId },

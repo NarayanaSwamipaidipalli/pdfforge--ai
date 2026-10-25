@@ -9,6 +9,7 @@ import { AiModule } from './ai/ai.module';
 import { BillingModule } from './billing/billing.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { AdminModule } from './admin/admin.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AdminModule } from './admin/admin.module';
     BillingModule,
     OrganizationsModule,
     AdminModule,
+    HealthModule,
   ],
   controllers: [],
   providers: [PrismaService],

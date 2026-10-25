@@ -47,6 +47,12 @@ export class PdfJobsController {
     return this.pdfJobsService.cancelJob(id);
   }
 
+  @Post(':id/retry')
+  @ApiOperation({ summary: 'Manually retry a failed or stalled processing job' })
+  async retryJob(@Param('id') id: string) {
+    return this.pdfJobsService.retryJob(id);
+  }
+
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Get('user/history')

@@ -1,9 +1,19 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateCheckoutSessionDto, BillingProvider, SubscriptionTier } from './dto/billing.dto';
+import {
+  CreateCheckoutSessionDto,
+  BillingProvider,
+  SubscriptionTier,
+  VerifyPaymentDto,
+  CreatePayPalOrderDto,
+  CapturePayPalOrderDto,
+  ApplyCouponDto,
+  CreateCouponDto,
+} from './dto/billing.dto';
 import Stripe from 'stripe';
 import axios from 'axios';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class BillingService {
@@ -17,6 +27,39 @@ export class BillingService {
     const stripeKey = this.configService.get<string>('STRIPE_SECRET_KEY');
     if (stripeKey && stripeKey !== 'mock_key') {
       this.stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' });
+    }
+    // Seed default coupons asynchronously
+    this.ensureDefaultCoupons().catch((err) =>
+      this.logger.warn(`Coupons initialization warning: ${err.message}`),
+    );
+  }
+
+  private async ensureDefaultCoupons() {
+    const existing = await this.prisma.coupon.count();
+    if (existing === 0) {
+      await this.prisma.coupon.createMany({
+        data: [
+          {
+            code: 'WELCOME50',
+            discountPercent: 50,
+            maxUses: 1000,
+            isActive: true,
+          },
+          {
+            code: 'PRO2026',
+            discountPercent: 20,
+            maxUses: 500,
+            isActive: true,
+          },
+          {
+            code: 'ENTERPRISE100',
+            discountAmount: 100,
+            maxUses: 100,
+            isActive: true,
+          },
+        ],
+      });
+      this.logger.log('Seeded default promotional coupons (WELCOME50, PRO2026, ENTERPRISE100)');
     }
   }
 
@@ -114,24 +157,107 @@ export class BillingService {
     ];
   }
 
+  getTierBaseAmount(tier: SubscriptionTier, interval: 'monthly' | 'yearly' = 'monthly'): number {
+    if (interval === 'yearly') {
+      if (tier === SubscriptionTier.PRO) return 120;
+      if (tier === SubscriptionTier.BUSINESS) return 490;
+      if (tier === SubscriptionTier.ENTERPRISE) return 1990;
+      return 0;
+    }
+    if (tier === SubscriptionTier.PRO) return 12;
+    if (tier === SubscriptionTier.BUSINESS) return 49;
+    if (tier === SubscriptionTier.ENTERPRISE) return 199;
+    return 0;
+  }
+
+  async applyCoupon(dto: ApplyCouponDto) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { code: dto.code.toUpperCase() },
+    });
+
+    if (!coupon || !coupon.isActive) {
+      throw new BadRequestException('Invalid or inactive coupon code');
+    }
+
+    if (coupon.validUntil && coupon.validUntil < new Date()) {
+      throw new BadRequestException('This coupon code has expired');
+    }
+
+    if (coupon.usedCount >= coupon.maxUses) {
+      throw new BadRequestException('This coupon code has reached its maximum usage limit');
+    }
+
+    const baseAmount = this.getTierBaseAmount(dto.tier, 'monthly');
+    let discount = 0;
+
+    if (coupon.discountPercent) {
+      discount = (baseAmount * coupon.discountPercent) / 100;
+    } else if (coupon.discountAmount) {
+      discount = Math.min(baseAmount, coupon.discountAmount);
+    }
+
+    const finalAmount = Math.max(0, +(baseAmount - discount).toFixed(2));
+
+    return {
+      valid: true,
+      code: coupon.code,
+      discountPercent: coupon.discountPercent,
+      discountAmount: coupon.discountAmount,
+      originalAmount: baseAmount,
+      finalAmount,
+      currency: coupon.currency,
+      message: `Coupon ${coupon.code} applied successfully!`,
+    };
+  }
+
   async createCheckoutSession(userId: string, dto: CreateCheckoutSessionDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
     const origin = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+    const interval = dto.interval || 'monthly';
+    let baseAmount = this.getTierBaseAmount(dto.tier, interval);
 
+    // Apply coupon if specified
+    if (dto.couponCode) {
+      try {
+        const couponRes = await this.applyCoupon({ code: dto.couponCode, tier: dto.tier });
+        baseAmount = couponRes.finalAmount;
+      } catch {
+        // Fallback to base
+      }
+    }
+
+    // 1. RAZORPAY GATEWAY
     if (dto.provider === BillingProvider.RAZORPAY) {
-      // Mock / Razorpay order creation
+      const orderId = `order_rzp_${crypto.randomBytes(8).toString('hex')}`;
+      const amountPaise = Math.round(baseAmount * 100 * 83); // USD to INR conversion approximate
+
       return {
         provider: 'razorpay',
-        orderId: `order_rzp_${Math.random().toString(36).substring(2, 10)}`,
-        amount: dto.tier === SubscriptionTier.PRO ? 1200 : 4900,
-        currency: 'USD',
-        keyId: this.configService.get<string>('RAZORPAY_KEY_ID', 'rzp_test_mock'),
+        orderId,
+        amount: amountPaise,
+        currency: 'INR',
+        keyId: this.configService.get<string>('RAZORPAY_KEY_ID', 'rzp_test_mock_enterprise'),
+        plan: dto.tier,
+        user: { name: user.name, email: user.email },
       };
     }
 
-    // Stripe checkout session
+    // 2. PAYPAL GATEWAY
+    if (dto.provider === BillingProvider.PAYPAL) {
+      const orderId = `PAYPAL-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      return {
+        provider: 'paypal',
+        orderId,
+        amount: baseAmount,
+        currency: 'USD',
+        plan: dto.tier,
+        approvalUrl: `${origin}/dashboard?provider=paypal&orderId=${orderId}&tier=${dto.tier}&status=approved`,
+      };
+    }
+
+    // 3. STRIPE GATEWAY
     if (this.stripe) {
       try {
         const session = await this.stripe.checkout.sessions.create({
@@ -144,17 +270,17 @@ export class BillingService {
                 currency: 'usd',
                 product_data: {
                   name: `PDFForge AI ${dto.tier} Plan`,
-                  description: `Access to PDFForge AI Enterprise features`,
+                  description: `Access to PDFForge AI Enterprise features (${interval})`,
                 },
-                unit_amount: dto.tier === SubscriptionTier.PRO ? 1200 : 4900,
+                unit_amount: Math.round(baseAmount * 100),
                 recurring: {
-                  interval: dto.interval === 'yearly' ? 'year' : 'month',
+                  interval: interval === 'yearly' ? 'year' : 'month',
                 },
               },
               quantity: 1,
             },
           ],
-          success_url: `${origin}/dashboard?session_id={CHECKOUT_SESSION_ID}&upgrade=success`,
+          success_url: `${origin}/dashboard?session_id={CHECKOUT_SESSION_ID}&upgrade=success&tier=${dto.tier}`,
           cancel_url: `${origin}/pricing?canceled=true`,
           metadata: {
             userId: user.id,
@@ -169,15 +295,116 @@ export class BillingService {
           checkoutUrl: session.url,
         };
       } catch (err) {
-        this.logger.error(`Stripe checkout error: ${(err as Error).message}`);
+        this.logger.error(`Stripe checkout session error: ${(err as Error).message}`);
       }
     }
 
-    // Simulated checkout URL for development/demo
+    // Simulated sandbox checkout URL for development/demo environments
     return {
       provider: 'stripe',
-      sessionId: `cs_test_${Math.random().toString(36).substring(2, 12)}`,
-      checkoutUrl: `${origin}/dashboard?upgrade=success&tier=${dto.tier}`,
+      sessionId: `cs_test_${crypto.randomBytes(8).toString('hex')}`,
+      checkoutUrl: `${origin}/dashboard?upgrade=success&tier=${dto.tier}&provider=stripe`,
+    };
+  }
+
+  async verifyRazorpayPayment(userId: string, dto: VerifyPaymentDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const keySecret = this.configService.get<string>('RAZORPAY_KEY_SECRET', 'mock_rzp_secret');
+    const expectedSignature = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${dto.orderId}|${dto.paymentId}`)
+      .digest('hex');
+
+    // In production, signature must match; in dev/test sandbox we allow mock verification
+    const isValid = dto.signature === expectedSignature || keySecret === 'mock_rzp_secret';
+
+    if (!isValid) {
+      throw new BadRequestException('Invalid Razorpay cryptographic payment signature');
+    }
+
+    const tier = dto.tier || SubscriptionTier.PRO;
+    const amount = this.getTierBaseAmount(tier);
+
+    // Update user plan
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { plan: tier },
+    });
+
+    // Create / Update subscription
+    await this.prisma.subscription.create({
+      data: {
+        userId,
+        plan: tier,
+        status: 'ACTIVE',
+        provider: 'razorpay',
+        razorpaySubscriptionId: dto.orderId,
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    // Record transaction
+    await this.prisma.payment.create({
+      data: {
+        userId,
+        provider: 'razorpay',
+        providerPaymentId: dto.paymentId,
+        amount,
+        currency: 'USD',
+        status: 'COMPLETED',
+        metadata: { orderId: dto.orderId, tier },
+      },
+    });
+
+    return {
+      success: true,
+      message: `Your account has been upgraded to ${tier} with Razorpay!`,
+      plan: tier,
+    };
+  }
+
+  async capturePayPalOrder(userId: string, dto: CapturePayPalOrderDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const tier = dto.tier || SubscriptionTier.PRO;
+    const amount = this.getTierBaseAmount(tier);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { plan: tier },
+    });
+
+    await this.prisma.subscription.create({
+      data: {
+        userId,
+        plan: tier,
+        status: 'ACTIVE',
+        provider: 'paypal',
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    await this.prisma.payment.create({
+      data: {
+        userId,
+        provider: 'paypal',
+        providerPaymentId: dto.orderId,
+        amount,
+        currency: 'USD',
+        status: 'COMPLETED',
+        metadata: { orderId: dto.orderId, tier },
+      },
+    });
+
+    return {
+      success: true,
+      message: `Your account has been upgraded to ${tier} with PayPal!`,
+      plan: tier,
     };
   }
 
@@ -207,11 +434,78 @@ export class BillingService {
             currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
           },
         });
-        this.logger.log(`User ${userId} successfully upgraded to ${tier}`);
+
+        await this.prisma.payment.create({
+          data: {
+            userId,
+            provider: 'stripe',
+            providerPaymentId: session.id,
+            amount: (session.amount_total || 1200) / 100,
+            currency: session.currency?.toUpperCase() || 'USD',
+            status: 'COMPLETED',
+            metadata: { sessionId: session.id, tier },
+          },
+        });
+
+        this.logger.log(`User ${userId} successfully upgraded to ${tier} via Stripe Webhook`);
       }
     }
 
     return { received: true };
+  }
+
+  async getUserBillingHistory(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        subscriptions: {
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        },
+        payments: {
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        },
+        invoices: {
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+      },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    const activeSubscription = user.subscriptions.find((s) => s.status === 'ACTIVE') || null;
+
+    return {
+      currentPlan: user.plan,
+      subscription: activeSubscription,
+      payments: user.payments,
+      invoices: user.invoices,
+    };
+  }
+
+  async cancelSubscription(userId: string) {
+    const sub = await this.prisma.subscription.findFirst({
+      where: { userId, status: 'ACTIVE' },
+    });
+
+    if (!sub) {
+      throw new BadRequestException('No active subscription found to cancel');
+    }
+
+    await this.prisma.subscription.update({
+      where: { id: sub.id },
+      data: {
+        cancelAtPeriodEnd: true,
+        canceledAt: new Date(),
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Your subscription has been scheduled to cancel at the end of the current billing cycle.',
+    };
   }
 
   async generateInvoicePdf(userId: string) {
@@ -244,6 +538,17 @@ export class BillingService {
         },
         { responseType: 'arraybuffer' },
       );
+
+      // Save invoice record in database
+      await this.prisma.invoice.create({
+        data: {
+          userId,
+          invoiceNumber: invoiceNum,
+          amount: this.getTierBaseAmount(user.plan as any),
+          currency: 'USD',
+          status: 'PAID',
+        },
+      });
 
       return {
         invoiceNumber: invoiceNum,

@@ -1,5 +1,6 @@
-import { Controller, Post, Body, Get, Delete, Param, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, Delete, Param, UseGuards, HttpCode, HttpStatus, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Request } from 'express';
 import { AuthService } from './auth.service';
 import {
   RegisterDto,
@@ -12,6 +13,7 @@ import {
   VerifyEmailDto,
   TwoFactorVerifyDto,
   CreateApiKeyDto,
+  ChangePasswordDto,
 } from './dto/auth.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/roles.decorator';
@@ -32,8 +34,10 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Authenticate user with email and password' })
   @ApiResponse({ status: 200, description: 'Successfully authenticated' })
-  async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Req() req: Request) {
+    const ip = (req.headers['x-forwarded-for'] as string) || req.ip || '127.0.0.1';
+    const userAgent = (req.headers['user-agent'] as string) || 'Web Browser';
+    return this.authService.login(dto, ip, userAgent);
   }
 
   @Post('google')
@@ -135,5 +139,44 @@ export class AuthController {
   @ApiOperation({ summary: 'Retrieve currently logged in profile and memberships' })
   async getProfile(@CurrentUser('sub') userId: string) {
     return this.authService.getMe(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Change current user password' })
+  async changePassword(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(userId, dto.oldPassword, dto.newPassword);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('sessions')
+  @ApiOperation({ summary: 'List all active user sessions and devices' })
+  async getSessions(@CurrentUser('sub') userId: string) {
+    return this.authService.getSessions(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Delete('sessions/:id')
+  @ApiOperation({ summary: 'Revoke a specific active user session' })
+  async revokeSession(
+    @CurrentUser('sub') userId: string,
+    @Param('id') sessionId: string,
+  ) {
+    return this.authService.revokeSession(userId, sessionId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Delete('sessions')
+  @ApiOperation({ summary: 'Revoke all other active user sessions' })
+  async revokeAllOtherSessions(@CurrentUser('sub') userId: string) {
+    return this.authService.revokeAllOtherSessions(userId);
   }
 }
