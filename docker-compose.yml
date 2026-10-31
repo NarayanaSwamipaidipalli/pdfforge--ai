@@ -111,6 +111,7 @@ services:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       S3_BUCKET_NAME: pdfforge-documents
+      PYTHONWARNINGS: "ignore::FutureWarning:fitz"
     ports:
       - "8000:8000"
     depends_on:
@@ -133,6 +134,7 @@ services:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       S3_BUCKET_NAME: pdfforge-documents
+      PYTHONWARNINGS: "ignore::FutureWarning:fitz"
     depends_on:
       - redis
       - pdf-worker

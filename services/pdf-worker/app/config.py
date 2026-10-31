@@ -1,10 +1,11 @@
 import os
 
 try:
-    from pydantic_settings import BaseSettings
+    from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:
     class BaseSettings:
         pass
+    SettingsConfigDict = None
 
 class Settings(BaseSettings):
     APP_NAME: str = "PDFForge AI Worker Engine"
@@ -25,7 +26,10 @@ class Settings(BaseSettings):
     # Working Directories
     TMP_STORAGE_DIR: str = os.getenv("TMP_STORAGE_DIR", "/tmp/pdfforge")
 
-    class Config:
-        env_file = ".env"
+    if SettingsConfigDict:
+        model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    else:
+        class Config:
+            env_file = ".env"
 
 settings = Settings()
