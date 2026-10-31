@@ -72,6 +72,7 @@ export class AiService {
     if (fileId) {
       const file = await this.prisma.fileRecord.findUnique({ where: { id: fileId } });
       if (file) return file;
+      throw new NotFoundException(`Document with ID "${fileId}" was not found`);
     }
     const existing = await this.prisma.fileRecord.findFirst({
       orderBy: { createdAt: 'desc' },

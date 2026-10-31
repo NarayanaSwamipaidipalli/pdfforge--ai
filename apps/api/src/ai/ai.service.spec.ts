@@ -27,7 +27,7 @@ describe('AiService', () => {
       isHealthy: jest.fn().mockResolvedValue(true),
       listInstalledModels: jest.fn().mockResolvedValue([{ name: 'llama3.1:8b', size: 4000000000, details: { parameter_size: '8B' } }]),
       chatCompletion: jest.fn().mockResolvedValue({
-        message: { content: 'Simulated local answer' },
+        message: { content: 'Executive Summary\n\nSimulated local answer' },
         eval_count: 150,
       }),
       generateEmbedding: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
