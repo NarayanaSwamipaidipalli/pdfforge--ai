@@ -20,7 +20,7 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const payload = await this.jwtService.verifyAsync(token, {
-        secret: this.configService.get<string>('JWT_SECRET', 'pdfforge-enterprise-jwt-super-secret-key-2026'),
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
       });
       request['user'] = payload;
     } catch {

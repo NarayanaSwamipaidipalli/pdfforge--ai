@@ -4,8 +4,49 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import helmet from 'helmet';
+import * as Sentry from '@sentry/node';
+
+const structuredLogger = {
+  log(message: unknown, context?: string) {
+    writeLog('info', message, context);
+  },
+  error(message: unknown, trace?: string, context?: string) {
+    writeLog('error', message, context, trace);
+  },
+  warn(message: unknown, context?: string) {
+    writeLog('warn', message, context);
+  },
+  debug(message: unknown, context?: string) {
+    writeLog('debug', message, context);
+  },
+  verbose(message: unknown, context?: string) {
+    writeLog('verbose', message, context);
+  },
+  fatal(message: unknown, context?: string) {
+    writeLog('fatal', message, context);
+  },
+};
+
+function writeLog(level: string, message: unknown, context?: string, trace?: string) {
+  process.stdout.write(`${JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    service: 'pdfforge-api',
+    context,
+    message: typeof message === 'string' ? message : JSON.stringify(message),
+    trace,
+  })}\n`);
+}
 
 async function bootstrap() {
+  const sentryDsn = process.env.SENTRY_DSN;
+  if (sentryDsn) {
+    Sentry.init({
+      dsn: sentryDsn,
+      environment: process.env.NODE_ENV || 'development',
+      tracesSampleRate: 0.1,
+    });
+  }
   // Support BigInt serialization in JSON responses
   (BigInt.prototype as any).toJSON = function () {
     const intVal = Number(this);
@@ -14,6 +55,8 @@ async function bootstrap() {
 
   const logger = new Logger('PDFForge-APIGateway');
   const app = await NestFactory.create(AppModule, {
+    rawBody: true,
+    logger: structuredLogger,
     cors: {
       origin: true,
       credentials: true,

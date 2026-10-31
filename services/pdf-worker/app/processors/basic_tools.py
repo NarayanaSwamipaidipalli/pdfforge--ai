@@ -147,8 +147,7 @@ def compress_pdf(input_path: str, output_path: str, level: str = "medium") -> st
         deflate=True,
         deflate_images=True,
         deflate_fonts=True,
-        clean=True,
-        linear=True  # Fast Web View
+        clean=True
     )
     doc.close()
     return output_path

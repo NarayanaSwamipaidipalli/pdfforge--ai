@@ -1,7 +1,8 @@
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="fitz")
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
+import hmac
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from app.config import settings
@@ -41,11 +42,19 @@ def health_check():
     }
 
 @app.post("/api/v1/jobs/process")
-async def dispatch_job(payload: ProcessJobRequest, background_tasks: BackgroundTasks):
+async def dispatch_job(
+    payload: ProcessJobRequest,
+    background_tasks: BackgroundTasks,
+    x_pdfforge_worker_secret: str = Header(..., alias="x-pdfforge-worker-secret"),
+):
     """
     Accepts processing requests from API Gateway and dispatches to Celery queue
     or background worker thread.
     """
+    if not settings.WORKER_CALLBACK_SECRET or not hmac.compare_digest(
+        x_pdfforge_worker_secret, settings.WORKER_CALLBACK_SECRET
+    ):
+        raise HTTPException(status_code=401, detail="Invalid worker authentication")
     try:
         # Enqueue in Celery
         task = process_pdf_task.delay(

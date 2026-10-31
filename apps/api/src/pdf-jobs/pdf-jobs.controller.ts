@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
 import { PdfJobsService } from './pdf-jobs.service';
 import { CreatePdfJobDto, WorkerCallbackDto } from './dto/job.dto';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/roles.decorator';
 
@@ -12,6 +13,7 @@ export class PdfJobsController {
   constructor(private readonly pdfJobsService: PdfJobsService) {}
 
   @Post()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Dispatch a new PDF processing or conversion task' })
   async createJob(

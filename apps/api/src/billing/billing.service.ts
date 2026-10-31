@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -18,7 +18,7 @@ import * as crypto from 'crypto';
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
-  private readonly stripe: Stripe | null = null;
+  private stripe: Stripe | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -32,6 +32,64 @@ export class BillingService {
     this.ensureDefaultCoupons().catch((err) =>
       this.logger.warn(`Coupons initialization warning: ${err.message}`),
     );
+  }
+
+  verifyStripeWebhook(rawBody?: Buffer, signature?: string): Stripe.Event {
+    const secret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET');
+    if (!rawBody || !signature || !secret || !this.stripe) {
+      throw new UnauthorizedException('Invalid Stripe webhook request');
+    }
+    try {
+      return this.stripe.webhooks.constructEvent(rawBody, signature, secret);
+    } catch {
+      throw new UnauthorizedException('Invalid Stripe webhook signature');
+    }
+  }
+
+  verifyRazorpayWebhook(rawBody?: Buffer, signature?: string): void {
+    const secret = this.configService.get<string>('RAZORPAY_WEBHOOK_SECRET');
+    if (!rawBody || !signature || !secret) {
+      throw new UnauthorizedException('Invalid Razorpay webhook request');
+    }
+    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+    const signatureBuffer = Buffer.from(signature, 'utf8');
+    if (
+      expectedBuffer.length !== signatureBuffer.length ||
+      !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)
+    ) {
+      throw new UnauthorizedException('Invalid Razorpay webhook signature');
+    }
+  }
+
+  async verifyPayPalWebhook(rawBody?: Buffer, headers: Record<string, string> = {}): Promise<void> {
+    const webhookId = this.configService.get<string>('PAYPAL_WEBHOOK_ID');
+    if (!rawBody || !webhookId) {
+      throw new UnauthorizedException('Invalid PayPal webhook request');
+    }
+    const transmissionId = headers['paypal-transmission-id'];
+    const transmissionTime = headers['paypal-transmission-time'];
+    const transmissionSig = headers['paypal-transmission-sig'];
+    const certUrl = headers['paypal-cert-url'];
+    if (!transmissionId || !transmissionTime || !transmissionSig || !certUrl) {
+      throw new UnauthorizedException('Invalid PayPal webhook signature');
+    }
+    if (!/^https:\/\/api\.paypal\.com\/|^https:\/\/api\.sandbox\.paypal\.com\//.test(certUrl)) {
+      throw new UnauthorizedException('Invalid PayPal certificate URL');
+    }
+    const certResponse = await axios.get(certUrl, { timeout: 5000 });
+    const cert = certResponse.data as string;
+    let crcValue = 0xffffffff;
+    for (const byte of rawBody) {
+      crcValue ^= byte;
+      for (let bit = 0; bit < 8; bit++) {
+        crcValue = (crcValue >>> 1) ^ ((crcValue & 1) ? 0xedb88320 : 0);
+      }
+    }
+    const crc = ((crcValue ^ 0xffffffff) >>> 0).toString();
+    const signedPayload = `${transmissionId}|${transmissionTime}|${webhookId}|${crc}`;
+    const valid = crypto.verify('RSA-SHA256', Buffer.from(signedPayload), cert, Buffer.from(transmissionSig, 'base64'));
+    if (!valid) throw new UnauthorizedException('Invalid PayPal webhook signature');
   }
 
   private async ensureDefaultCoupons() {

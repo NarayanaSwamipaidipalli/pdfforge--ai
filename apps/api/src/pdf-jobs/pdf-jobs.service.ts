@@ -296,6 +296,10 @@ export class PdfJobsService {
         'API_GATEWAY_INTERNAL_URL',
         process.env.NODE_ENV === 'production' ? 'http://api-gateway:4000' : 'http://localhost:4000',
       );
+      const workerSecret = this.configService.get<string>('WORKER_CALLBACK_SECRET', 'pdfforge-worker-internal-secret');
+      if (!workerSecret) {
+        throw new Error('WORKER_CALLBACK_SECRET is required');
+      }
 
       // Send payload to Python worker FastAPI endpoint
       await axios.post(
@@ -311,7 +315,10 @@ export class PdfJobsService {
           parameters,
           callbackUrl: `${internalApiUrl}/api/v1/pdf/jobs/callback`,
         },
-        { timeout: 10000 },
+        {
+          timeout: 10000,
+          headers: { 'x-pdfforge-worker-secret': workerSecret },
+        },
       );
     } catch (err) {
       this.logger.warn(

@@ -586,7 +586,7 @@ export class AuthService implements OnModuleInit {
   }
 
   private async generateTokens(userId: string, email: string, role: string) {
-    const jwtSecret = this.configService.get<string>('JWT_SECRET', 'pdfforge-enterprise-jwt-super-secret-key-2026');
+    const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
     const refreshSecret = this.configService.get<string>('JWT_REFRESH_SECRET', 'pdfforge-refresh-secret-enterprise-2026');
 
     const [accessToken, refreshToken] = await Promise.all([

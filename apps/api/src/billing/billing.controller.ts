@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, UseGuards, Res, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, Res, Req, Headers, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { BillingService } from './billing.service';
 import {
@@ -10,6 +10,8 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/roles.decorator';
 import { Response } from 'express';
+import { Request } from 'express';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Billing & Subscriptions')
 @Controller('api/v1/billing')
@@ -32,6 +34,7 @@ export class BillingController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('checkout')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Initialize Stripe Checkout Session, Razorpay Order, or PayPal Order' })
   async createCheckout(
     @Body() dto: CreateCheckoutSessionDto,
@@ -84,21 +87,30 @@ export class BillingController {
   @Post('webhook/stripe')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Stripe webhook receiver for asynchronous subscription events' })
-  async handleStripeWebhook(@Body() event: any) {
+  async handleStripeWebhook(
+    @Req() req: Request,
+    @Headers('stripe-signature') signature: string,
+  ) {
+    const event = this.billingService.verifyStripeWebhook((req as any).rawBody, signature);
     return this.billingService.handleStripeWebhook(event);
   }
 
   @Post('webhook/razorpay')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Razorpay webhook receiver' })
-  async handleRazorpayWebhook(@Body() event: any) {
+  async handleRazorpayWebhook(
+    @Req() req: Request,
+    @Headers('x-razorpay-signature') signature: string,
+  ) {
+    this.billingService.verifyRazorpayWebhook((req as any).rawBody, signature);
     return { received: true };
   }
 
   @Post('webhook/paypal')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'PayPal webhook receiver' })
-  async handlePayPalWebhook(@Body() event: any) {
+  async handlePayPalWebhook(@Req() req: Request, @Headers() headers: Record<string, string>) {
+    await this.billingService.verifyPayPalWebhook((req as any).rawBody, headers);
     return { received: true };
   }
 

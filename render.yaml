@@ -20,6 +20,7 @@ services:
     env: node
     plan: standard
     buildCommand: cd apps/api && npm install && npm run prisma:generate && npm run build
+    preDeployCommand: cd apps/api && npx prisma migrate deploy
     startCommand: cd apps/api && npm run start:prod
     envVars:
       - key: NODE_ENV
@@ -35,10 +36,14 @@ services:
           type: redis
           name: pdfforge-redis
           property: connectionString
+      - key: PDF_WORKER_URL
+        value: https://pdfforge-worker.onrender.com
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
+      - key: WORKER_CALLBACK_SECRET
+        value: pdfforge-worker-internal-secret
 
   # Python FastAPI & Celery Engine
   - type: web
@@ -53,6 +58,15 @@ services:
           type: redis
           name: pdfforge-redis
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: pdfforge-redis
+          property: connectionString
+      - key: PYTHONWARNINGS
+        value: ignore::FutureWarning:fitz
+      - key: WORKER_CALLBACK_SECRET
+        value: pdfforge-worker-internal-secret
 
 databases:
   - name: pdfforge-postgres

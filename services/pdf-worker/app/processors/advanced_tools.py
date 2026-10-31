@@ -77,8 +77,7 @@ def repair_pdf(input_path: str, output_path: str) -> str:
         output_path,
         garbage=4,
         clean=True,
-        deflate=True,
-        linear=True
+        deflate=True
     )
     doc.close()
     return output_path
@@ -242,4 +241,3 @@ def redact_sensitive_text(
         "redactionsApplied": total_redactions,
         "keywordsRedacted": targets
     }
-

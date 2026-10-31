@@ -10,6 +10,7 @@ import {
 } from './dto/file.dto';
 import { CurrentUser } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Files & Storage')
 @Controller('api/v1/files')
@@ -18,6 +19,7 @@ export class FilesController {
   constructor(private readonly filesService: FilesService) {}
 
   @Post('presign-upload')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Obtain S3 pre-signed upload URL for direct streaming' })
   async presignUpload(
     @Body() dto: PresignUploadDto,
