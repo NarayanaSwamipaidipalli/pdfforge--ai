@@ -1,7 +1,7 @@
 import os
 import io
 import tempfile
-import fitz
+import pymupdf
 from PIL import Image
 from docx import Document
 from app.processors.pdf_to_word_engine import (
@@ -12,7 +12,7 @@ from app.processors.pdf_to_word_engine import (
 
 def create_complex_test_pdf(pdf_path: str):
     """Generates a rich PDF containing headings, styled text, tables, and images."""
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page(width=612, height=792)
     
     # 1. Title and Typography
@@ -26,7 +26,7 @@ def create_complex_test_pdf(pdf_path: str):
     )
     
     # 2. Table with Borders
-    rect = fitz.Rect(72, 160, 540, 240)
+    rect = pymupdf.Rect(72, 160, 540, 240)
     page.draw_rect(rect, color=(0.2, 0.2, 0.2), width=1)
     page.draw_line((72, 190), (540, 190), color=(0.2, 0.2, 0.2), width=1)
     page.draw_line((250, 160), (250, 240), color=(0.2, 0.2, 0.2), width=1)
@@ -45,12 +45,12 @@ def create_complex_test_pdf(pdf_path: str):
     img = Image.new("RGB", (180, 80), color=(70, 130, 180))
     img_buf = io.BytesIO()
     img.save(img_buf, format="PNG")
-    page.insert_image(fitz.Rect(72, 270, 252, 350), stream=img_buf.getvalue())
+    page.insert_image(pymupdf.Rect(72, 270, 252, 350), stream=img_buf.getvalue())
     
     # 4. Hyperlink
-    link_rect = fitz.Rect(72, 380, 300, 400)
+    link_rect = pymupdf.Rect(72, 380, 300, 400)
     page.insert_text((72, 395), "Visit documentation at https://pdfforge.ai/docs", fontsize=10, fontname="helv", color=(0.0, 0.4, 0.8))
-    page.insert_link({"kind": fitz.LINK_URI, "from": link_rect, "uri": "https://pdfforge.ai/docs"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": link_rect, "uri": "https://pdfforge.ai/docs"})
     
     doc.save(pdf_path)
     doc.close()
@@ -99,16 +99,16 @@ def test_scanned_page_detection():
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Create pure image scanned PDF
         scanned_pdf = os.path.join(tmp_dir, "scanned.pdf")
-        doc = fitz.open()
+        doc = pymupdf.open()
         page = doc.new_page(width=612, height=792)
         img = Image.new("RGB", (400, 600), color=(240, 240, 240))
         img_buf = io.BytesIO()
         img.save(img_buf, format="PNG")
-        page.insert_image(fitz.Rect(36, 36, 576, 756), stream=img_buf.getvalue())
+        page.insert_image(pymupdf.Rect(36, 36, 576, 756), stream=img_buf.getvalue())
         doc.save(scanned_pdf)
         doc.close()
         
-        doc_check = fitz.open(scanned_pdf)
+        doc_check = pymupdf.open(scanned_pdf)
         is_scanned, scanned_indices = detect_scanned_document(doc_check)
         doc_check.close()
         

@@ -1,5 +1,5 @@
 from docx import Document
-import fitz
+import pymupdf
 
 print('=== INSPECTING tinkering lab manual DOCX ===')
 p1 = '/tmp/pdfforge/7784086c-097f-48e8-bb2a-26533f23260a/result_7784086c-097f-48e8-bb2a-26533f23260a.docx'
@@ -22,7 +22,7 @@ for i, p in enumerate(d2.paragraphs[:10]):
     print(f'P{i+1}: {repr(p.text[:60])}')
 
 print('\n=== INSPECTING SOURCE Document.pdf ===')
-pdf2 = fitz.open('/tmp/pdfforge/db77bbff-3569-4859-94e1-f4270a08a8f7/0_a83196f6_Document.pdf')
+pdf2 = pymupdf.open('/tmp/pdfforge/db77bbff-3569-4859-94e1-f4270a08a8f7/0_a83196f6_Document.pdf')
 print('PDF2 Pages:', len(pdf2))
 for i in range(min(3, len(pdf2))):
     print(f'Page {i+1} text length:', len(pdf2[i].get_text()))

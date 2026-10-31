@@ -1,7 +1,7 @@
 import os
 import io
 from typing import List, Optional, Dict, Any, Union
-import fitz  # PyMuPDF
+import pymupdf
 from PIL import Image
 
 def parse_page_indices(raw: Any, preserve_order: bool = False) -> List[int]:
@@ -63,9 +63,9 @@ def parse_page_indices(raw: Any, preserve_order: bool = False) -> List[int]:
 
 def merge_pdfs(input_paths: List[str], output_path: str) -> str:
     """Merges multiple PDF documents into a single sequential PDF."""
-    result_doc = fitz.open()
+    result_doc = pymupdf.open()
     for path in input_paths:
-        with fitz.open(path) as doc:
+        with pymupdf.open(path) as doc:
             result_doc.insert_pdf(doc)
     result_doc.save(output_path, garbage=4, deflate=True)
     result_doc.close()
@@ -73,8 +73,8 @@ def merge_pdfs(input_paths: List[str], output_path: str) -> str:
 
 def split_pdf(input_path: str, output_path: str, page_ranges: Any = None) -> str:
     """Splits or slices specified pages from a PDF document."""
-    doc = fitz.open(input_path)
-    result_doc = fitz.open()
+    doc = pymupdf.open(input_path)
+    result_doc = pymupdf.open()
     
     total_pages = len(doc)
     parsed = parse_page_indices(page_ranges) if page_ranges is not None and page_ranges != "" and page_ranges != [] else []
@@ -95,7 +95,7 @@ def compress_pdf(input_path: str, output_path: str, level: str = "medium") -> st
     Compresses PDF using vector garbage collection, stream deflation,
     and genuine image resolution downsampling.
     """
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     
     quality = 75
     max_dim = 1600
@@ -155,7 +155,7 @@ def compress_pdf(input_path: str, output_path: str, level: str = "medium") -> st
 
 def rotate_pdf(input_path: str, output_path: str, degrees: int = 90, pages: Any = None) -> str:
     """Rotates all or specified pages in the PDF by 90, 180, or 270 degrees."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     target_pages = set(parse_page_indices(pages)) if pages else None
     for i, page in enumerate(doc):
         if target_pages is None or i in target_pages:
@@ -168,7 +168,7 @@ def rotate_pdf(input_path: str, output_path: str, degrees: int = 90, pages: Any 
 
 def delete_pages(input_path: str, output_path: str, pages_to_delete: Any) -> str:
     """Removes targeted page numbers from the PDF document safely."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     total_pages = len(doc)
     
     parsed = parse_page_indices(pages_to_delete)
@@ -198,8 +198,8 @@ def extract_pages(input_path: str, output_path: str, pages_to_extract: Any) -> s
 
 def reorder_pages(input_path: str, output_path: str, new_order: Any) -> str:
     """Rearranges the page order of a PDF to match new_order list."""
-    doc = fitz.open(input_path)
-    result_doc = fitz.open()
+    doc = pymupdf.open(input_path)
+    result_doc = pymupdf.open()
     total_pages = len(doc)
     
     parsed = parse_page_indices(new_order, preserve_order=True)
@@ -226,7 +226,7 @@ def organize_pages(
     Unified page organizer: deletes unneeded pages, reorders remaining,
     and applies selective rotations in a single pass.
     """
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     total = len(doc)
     to_delete = set(parse_page_indices(pages_to_delete)) if pages_to_delete else set()
     order_parsed = parse_page_indices(new_order, preserve_order=True) if new_order else []
@@ -239,7 +239,7 @@ def organize_pages(
     if not base_order:
         base_order = [0]
         
-    result_doc = fitz.open()
+    result_doc = pymupdf.open()
     for idx, p in enumerate(base_order):
         result_doc.insert_pdf(doc, from_page=p, to_page=p)
         if rotations:
@@ -262,12 +262,12 @@ def crop_pdf(
     pages: Any = None
 ) -> str:
     """Crops page margins by adjusting the visible cropbox rectangle."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     target_pages = set(parse_page_indices(pages)) if pages else None
     for i, page in enumerate(doc):
         if target_pages is None or i in target_pages:
             rect = page.rect
-            new_rect = fitz.Rect(
+            new_rect = pymupdf.Rect(
                 rect.x0 + left,
                 rect.y0 + top,
                 max(rect.x0 + left + 50, rect.x1 - right),
@@ -288,7 +288,7 @@ def add_page_numbers(
     start_page: int = 1
 ) -> str:
     """Inserts sequential page number stamps onto every page."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     total_pages = len(doc)
     
     for i, page in enumerate(doc):
@@ -298,15 +298,15 @@ def add_page_numbers(
         
         # Position calculations
         if position == "bottom-right":
-            pt = fitz.Point(rect.width - 120, rect.height - 24)
+            pt = pymupdf.Point(rect.width - 120, rect.height - 24)
         elif position == "bottom-left":
-            pt = fitz.Point(36, rect.height - 24)
+            pt = pymupdf.Point(36, rect.height - 24)
         elif position == "top-right":
-            pt = fitz.Point(rect.width - 120, 36)
+            pt = pymupdf.Point(rect.width - 120, 36)
         elif position == "top-center":
-            pt = fitz.Point(rect.width / 2 - (len(text) * font_size * 0.25), 36)
+            pt = pymupdf.Point(rect.width / 2 - (len(text) * font_size * 0.25), 36)
         else:  # bottom-center
-            pt = fitz.Point(rect.width / 2 - (len(text) * font_size * 0.25), rect.height - 24)
+            pt = pymupdf.Point(rect.width / 2 - (len(text) * font_size * 0.25), rect.height - 24)
             
         page.insert_text(
             pt,
@@ -329,14 +329,14 @@ def add_watermark(
     rotation: int = 45
 ) -> str:
     """Draws diagonal translucent text watermark across every page of the PDF."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     
     for page in doc:
         rect = page.rect
         center_x = rect.width / 2
         center_y = rect.height / 2
         
-        pt = fitz.Point(center_x - (len(text) * font_size * 0.25), center_y)
+        pt = pymupdf.Point(center_x - (len(text) * font_size * 0.25), center_y)
         if rotation in (0, 90, 180, 270):
             page.insert_text(
                 pt,
@@ -351,7 +351,7 @@ def add_watermark(
                 pt,
                 text,
                 fontsize=font_size,
-                morph=(pt, fitz.Matrix(rotation)),
+                morph=(pt, pymupdf.Matrix(rotation)),
                 color=(0.7, 0.7, 0.7),
                 fill_opacity=opacity
             )
@@ -362,15 +362,15 @@ def add_watermark(
 
 def encrypt_pdf(input_path: str, output_path: str, user_pw: str, owner_pw: Optional[str] = None) -> str:
     """Encrypts PDF using AES-256 standard encryption with granular access permissions."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     perm = int(
-        fitz.PDF_PERM_PRINT
-        | fitz.PDF_PERM_COPY
-        | fitz.PDF_PERM_ANNOTATE
+        pymupdf.PDF_PERM_PRINT
+        | pymupdf.PDF_PERM_COPY
+        | pymupdf.PDF_PERM_ANNOTATE
     )
     doc.save(
         output_path,
-        encryption=fitz.PDF_ENCRYPT_AES_256,
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
         user_pw=user_pw,
         owner_pw=owner_pw or user_pw,
         permissions=perm,
@@ -381,12 +381,12 @@ def encrypt_pdf(input_path: str, output_path: str, user_pw: str, owner_pw: Optio
 
 def decrypt_pdf(input_path: str, output_path: str, password: str) -> str:
     """Removes password protection and encryption from a PDF document."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     if doc.is_encrypted:
         success = doc.authenticate(password)
         if not success:
             raise ValueError("Invalid password supplied for PDF decryption")
             
-    doc.save(output_path, encryption=fitz.PDF_ENCRYPT_NONE, garbage=4, deflate=True)
+    doc.save(output_path, encryption=pymupdf.PDF_ENCRYPT_NONE, garbage=4, deflate=True)
     doc.close()
     return output_path

@@ -1,13 +1,13 @@
 import os
 from typing import Dict, Any, List
-import fitz
+import pymupdf
 
 def ocr_pdf(input_path: str, output_path: str, language: str = "eng") -> str:
     """
     Generates a searchable PDF by performing OCR on scanned pages
     and embedding invisible text layers matching the bounding boxes.
     """
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     # PyMuPDF provides built-in OCR via pdfocr_tobytes or Tesseract integration
     try:
         # Check if native OCR support is compiled
@@ -26,10 +26,10 @@ def compare_pdfs(path_a: str, path_b: str, output_diff_path: str) -> Dict[str, A
     Performs visual & structural difference analysis between two document revisions.
     Highlights modified, added, or removed text.
     """
-    doc_a = fitz.open(path_a)
-    doc_b = fitz.open(path_b)
+    doc_a = pymupdf.open(path_a)
+    doc_b = pymupdf.open(path_b)
     
-    diff_doc = fitz.open()
+    diff_doc = pymupdf.open()
     total_pages = max(len(doc_a), len(doc_b))
     changes_detected = 0
     
@@ -51,8 +51,8 @@ def compare_pdfs(path_a: str, path_b: str, output_diff_path: str) -> Dict[str, A
             if text_a != text_b:
                 changes_detected += 1
                 # Annotate modified page
-                target_page.add_rect_annot(fitz.Rect(10, 10, target_page.rect.width - 10, 30))
-                target_page.insert_text(fitz.Point(15, 25), "REVISION DETECTED ON THIS PAGE", color=(1, 0, 0), fontsize=12)
+                target_page.add_rect_annot(pymupdf.Rect(10, 10, target_page.rect.width - 10, 30))
+                target_page.insert_text(pymupdf.Point(15, 25), "REVISION DETECTED ON THIS PAGE", color=(1, 0, 0), fontsize=12)
                 
     diff_doc.save(output_diff_path, garbage=3, deflate=True)
     doc_a.close()
@@ -71,7 +71,7 @@ def repair_pdf(input_path: str, output_path: str) -> str:
     and repairs corrupted PDF stream dictionaries.
     """
     # PyMuPDF reconstructs broken xref tables automatically on open
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     # Save with full garbage collection level 4 and stream sanitation
     doc.save(
         output_path,
@@ -92,7 +92,7 @@ def edit_metadata(
     keywords: str = None
 ) -> str:
     """Modifies the document Information Dictionary (metadata headers)."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     meta = doc.metadata or {}
     
     if title is not None:
@@ -125,7 +125,7 @@ def apply_digital_signature(
     import hashlib
     from datetime import datetime
 
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     target_idx = (len(doc) - 1) if page_num == -1 else min(page_num, len(doc) - 1)
     page = doc[target_idx]
 
@@ -137,33 +137,33 @@ def apply_digital_signature(
     sig_w, sig_h = 240, 60
     sig_x = rect.width - sig_w - 36
     sig_y = rect.height - sig_h - 36
-    sig_box = fitz.Rect(sig_x, sig_y, sig_x + sig_w, sig_y + sig_h)
+    sig_box = pymupdf.Rect(sig_x, sig_y, sig_x + sig_w, sig_y + sig_h)
 
     # Visual signature bounding box & badge
     page.draw_rect(sig_box, color=(0.1, 0.45, 0.9), width=1.5, fill=(0.95, 0.97, 1.0))
     stamp_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     page.insert_text(
-        fitz.Point(sig_x + 8, sig_y + 16),
+        pymupdf.Point(sig_x + 8, sig_y + 16),
         f"DIGITALLY VERIFIED: {signer_name}",
         fontsize=9,
         fontname="Helvetica-Bold",
         color=(0.06, 0.1, 0.2)
     )
     page.insert_text(
-        fitz.Point(sig_x + 8, sig_y + 30),
+        pymupdf.Point(sig_x + 8, sig_y + 30),
         f"Reason: {reason}",
         fontsize=7.5,
         color=(0.2, 0.25, 0.35)
     )
     page.insert_text(
-        fitz.Point(sig_x + 8, sig_y + 42),
+        pymupdf.Point(sig_x + 8, sig_y + 42),
         f"Timestamp: {stamp_time}",
         fontsize=7,
         color=(0.4, 0.45, 0.5)
     )
     page.insert_text(
-        fitz.Point(sig_x + 8, sig_y + 53),
+        pymupdf.Point(sig_x + 8, sig_y + 53),
         f"SHA-256 Seal: {file_sha256}... (DoD-Verified)",
         fontsize=6.5,
         fontname="Courier",
@@ -185,7 +185,7 @@ def apply_bates_numbering(
     """
     Applies sequential Bates numbering across all pages for legal and regulatory compliance.
     """
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     seq = start_number
 
     for page in doc:
@@ -193,13 +193,13 @@ def apply_bates_numbering(
         formatted_bates = f"{prefix}-{str(seq).zfill(digits)}"
 
         if position == "bottom-right":
-            pt = fitz.Point(rect.width - 130, rect.height - 18)
+            pt = pymupdf.Point(rect.width - 130, rect.height - 18)
         elif position == "bottom-left":
-            pt = fitz.Point(36, rect.height - 18)
+            pt = pymupdf.Point(36, rect.height - 18)
         elif position == "top-right":
-            pt = fitz.Point(rect.width - 130, 28)
+            pt = pymupdf.Point(rect.width - 130, 28)
         else:
-            pt = fitz.Point(rect.width / 2 - 40, rect.height - 18)
+            pt = pymupdf.Point(rect.width / 2 - 40, rect.height - 18)
 
         page.insert_text(
             pt,
@@ -223,7 +223,7 @@ def redact_sensitive_text(
     Irreversibly redacts targeted keywords, PII, and custom search terms from PDF.
     Physically zeroes underlying text and image bytes matching DoD 5220.22-M.
     """
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     targets = keywords or ["CONFIDENTIAL", "SSN", "PASSWORD", "SECRET"]
     total_redactions = 0
 

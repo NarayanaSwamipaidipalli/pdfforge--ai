@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="fitz")
+
 import os
 import io
 import time
@@ -5,7 +8,7 @@ import logging
 import tempfile
 import shutil
 from typing import List, Optional, Dict, Any, Tuple
-import fitz  # PyMuPDF
+import pymupdf
 from PIL import Image
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
@@ -84,7 +87,7 @@ def add_hyperlink_to_paragraph(paragraph, url: str, text: str, font_size_pt: flo
     paragraph._p.append(hyperlink)
 
 
-def detect_scanned_document(doc: fitz.Document, sample_pages: int = 10) -> Tuple[bool, List[int]]:
+def detect_scanned_document(doc: pymupdf.Document, sample_pages: int = 10) -> Tuple[bool, List[int]]:
     """
     Detects whether pages in a PDF are scanned / bitmap-only pages requiring OCR.
     Returns (has_any_scanned, list_of_scanned_page_indices).
@@ -106,7 +109,7 @@ def detect_scanned_document(doc: fitz.Document, sample_pages: int = 10) -> Tuple
     return is_scanned, scanned_pages
 
 
-def ocr_page_to_searchable_doc(page: fitz.Page, lang: str = "eng", dpi: int = 150) -> Optional[fitz.Document]:
+def ocr_page_to_searchable_doc(page: pymupdf.Page, lang: str = "eng", dpi: int = 150) -> Optional[pymupdf.Document]:
     """
     Runs Tesseract OCR on a scanned page and returns a single-page PyMuPDF Document
     with invisible searchable text overlay at exact coordinate positions.
@@ -124,7 +127,7 @@ def ocr_page_to_searchable_doc(page: fitz.Page, lang: str = "eng", dpi: int = 15
         del img_bytes
         gc.collect()
         if pdf_bytes:
-            return fitz.open("pdf", pdf_bytes)
+            return pymupdf.open("pdf", pdf_bytes)
     except Exception as e:
         logger.warning(f"OCR preprocessing failed on page {page.number}: {e}")
     return None
@@ -138,7 +141,7 @@ def preprocess_pdf_with_ocr_if_needed(input_path: str, config: ConversionConfig)
     if not config.ocr_enabled:
         return input_path
         
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     is_scanned, scanned_indices = detect_scanned_document(doc)
     
     if not is_scanned:
@@ -151,7 +154,7 @@ def preprocess_pdf_with_ocr_if_needed(input_path: str, config: ConversionConfig)
         scanned_indices = scanned_indices[:config.max_ocr_pages]
 
     logger.info(f"Detected {len(scanned_indices)} scanned page(s). Running OCR enhancement at {config.dpi} DPI...")
-    ocr_doc = fitz.open()
+    ocr_doc = pymupdf.open()
     
     for i in range(len(doc)):
         page = doc[i]
@@ -184,7 +187,7 @@ def convert_with_pdf2docx_engine(input_path: str, output_path: str, config: Conv
     """
     try:
         from pdf2docx import Converter
-        doc = fitz.open(input_path)
+        doc = pymupdf.open(input_path)
         total_pages = len(doc)
         doc.close()
         
@@ -216,7 +219,7 @@ def convert_with_native_pipeline(input_path: str, output_path: str, config: Conv
     - Preserves hyperlinks with active Word URLs
     """
     logger.info("Executing native high-fidelity layout reconstruction pipeline...")
-    pdf = fitz.open(input_path)
+    pdf = pymupdf.open(input_path)
     doc = Document()
     
     # Remove default empty paragraph created by python-docx
@@ -309,8 +312,8 @@ def convert_with_native_pipeline(input_path: str, output_path: str, config: Conv
         
         for b in blocks:
             # Skip blocks that overlap detected tables
-            b_rect = fitz.Rect(b["bbox"])
-            if any(b_rect.intersects(fitz.Rect(tr)) for tr in table_rects):
+            b_rect = pymupdf.Rect(b["bbox"])
+            if any(b_rect.intersects(pymupdf.Rect(tr)) for tr in table_rects):
                 continue
                 
             # Type 0: Text Block
@@ -338,7 +341,7 @@ def convert_with_native_pipeline(input_path: str, output_path: str, config: Conv
                     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
                 for l_idx, line in enumerate(block_lines):
-                    line_rect = fitz.Rect(line["bbox"])
+                    line_rect = pymupdf.Rect(line["bbox"])
                     
                     # Check for hyperlinks
                     active_url = None

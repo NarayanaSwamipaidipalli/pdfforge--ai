@@ -2,13 +2,13 @@ import re
 import os
 import math
 from typing import List, Dict, Any, Optional
-import fitz
+import pymupdf
 
 def extract_tables_and_text(input_path: str) -> Dict[str, Any]:
     """
     Extracts structured layout data, paragraphs, and tables from a PDF document.
     """
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     pages_data = []
     total_words = 0
     full_text_list = []
@@ -51,7 +51,7 @@ def chunk_document_for_rag(input_path: str, chunk_size_words: int = 250, overlap
     """
     Splits PDF text into semantic chunks with page citations for RAG embeddings.
     """
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     chunks = []
     chunk_id = 0
     

@@ -2,17 +2,17 @@ import os
 import csv
 import subprocess
 from typing import List, Optional, Dict, Any
-import fitz
+import pymupdf
 from PIL import Image
 
 def pdf_to_images(input_path: str, output_dir: str, dpi: int = 200, img_format: str = "png") -> List[str]:
     """Renders every PDF page into high-resolution images."""
     os.makedirs(output_dir, exist_ok=True)
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     output_files = []
     
     zoom = dpi / 72.0
-    matrix = fitz.Matrix(zoom, zoom)
+    matrix = pymupdf.Matrix(zoom, zoom)
     
     for i, page in enumerate(doc):
         pix = page.get_pixmap(matrix=matrix, alpha=False)
@@ -25,7 +25,7 @@ def pdf_to_images(input_path: str, output_dir: str, dpi: int = 200, img_format: 
 
 def images_to_pdf(image_paths: List[str], output_path: str) -> str:
     """Converts a collection of images (JPG, PNG, WebP) into a consolidated PDF."""
-    result_doc = fitz.open()
+    result_doc = pymupdf.open()
     
     for img_path in image_paths:
         try:
@@ -34,18 +34,18 @@ def images_to_pdf(image_paths: List[str], output_path: str) -> str:
                     img = img.convert("RGB")
                     temp_rgb = img_path + ".rgb.jpg"
                     img.save(temp_rgb, "JPEG")
-                    img_doc = fitz.open(temp_rgb)
+                    img_doc = pymupdf.open(temp_rgb)
                     pdf_bytes = img_doc.convert_to_pdf()
-                    img_pdf = fitz.open("pdf", pdf_bytes)
+                    img_pdf = pymupdf.open("pdf", pdf_bytes)
                     result_doc.insert_pdf(img_pdf)
                     img_doc.close()
                     img_pdf.close()
                     if os.path.exists(temp_rgb):
                         os.remove(temp_rgb)
                 else:
-                    img_bytes = fitz.open(img_path)
+                    img_bytes = pymupdf.open(img_path)
                     pdf_bytes = img_bytes.convert_to_pdf()
-                    img_pdf = fitz.open("pdf", pdf_bytes)
+                    img_pdf = pymupdf.open("pdf", pdf_bytes)
                     result_doc.insert_pdf(img_pdf)
                     img_bytes.close()
                     img_pdf.close()
@@ -63,7 +63,7 @@ def pdf_to_word(input_path: str, output_path: str, options: Optional[Dict[str, A
 
 def pdf_to_excel(input_path: str, output_path: str) -> str:
     """Extracts tables and tabular numerical data from PDF into CSV/Excel format."""
-    doc = fitz.open(input_path)
+    doc = pymupdf.open(input_path)
     all_rows = []
     
     for page_idx, page in enumerate(doc):
@@ -105,7 +105,7 @@ def pdf_to_ppt(input_path: str, output_path: str) -> str:
         prs.slide_width = Inches(13.333)
         prs.slide_height = Inches(7.5)
         
-        doc = fitz.open(input_path)
+        doc = pymupdf.open(input_path)
         blank_slide_layout = prs.slide_layouts[6]  # Blank
         
         for i, page in enumerate(doc):
@@ -142,7 +142,7 @@ def pdf_to_ppt(input_path: str, output_path: str) -> str:
         prs.save(output_path)
     except Exception:
         # Fallback if python-pptx not present: generate presentation zip or text
-        doc = fitz.open(input_path)
+        doc = pymupdf.open(input_path)
         slides_text = []
         for i, page in enumerate(doc):
             slides_text.append(f"SLIDE {i + 1}\n" + page.get_text())
@@ -158,15 +158,15 @@ def html_to_pdf(input_path: str, output_path: str) -> str:
     with open(input_path, "r", encoding="utf-8", errors="ignore") as f:
         html_content = f.read()
         
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page()
     rect = page.rect
     
     # Use PyMuPDF Story API for robust HTML styling
     try:
-        story = fitz.Story(html=html_content)
+        story = pymupdf.Story(html=html_content)
         body = story.body()
-        writer = fitz.DocumentWriter(output_path)
+        writer = pymupdf.DocumentWriter(output_path)
         more = 1
         while more:
             device = writer.begin_page(rect)
@@ -203,7 +203,7 @@ def html_to_pdf(input_path: str, output_path: str) -> str:
         if story_flowables:
             pdf_doc.build(story_flowables)
         else:
-            page.insert_text(fitz.Point(72, 72), "Converted HTML Document", fontsize=16)
+            page.insert_text(pymupdf.Point(72, 72), "Converted HTML Document", fontsize=16)
             doc.save(output_path)
             doc.close()
         return output_path

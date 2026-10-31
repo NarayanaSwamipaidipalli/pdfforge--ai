@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="fitz")
+
 import os
 import time
 import httpx
@@ -24,6 +27,7 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
+    broker_connection_retry_on_startup=True,
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
@@ -61,10 +65,10 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 except Exception as s3_err:
                     print(f"Could not download from S3 {s3_key}: {s3_err}")
             if not downloaded and not os.path.exists(local_path):
-                import fitz
-                doc = fitz.open()
+                import pymupdf
+                doc = pymupdf.open()
                 page = doc.new_page()
-                page.insert_text(fitz.Point(72, 72), f"PDFForge AI: {clean_name}", fontsize=20)
+                page.insert_text(pymupdf.Point(72, 72), f"PDFForge AI: {clean_name}", fontsize=20)
                 doc.save(local_path)
                 doc.close()
             input_paths.append(local_path)
