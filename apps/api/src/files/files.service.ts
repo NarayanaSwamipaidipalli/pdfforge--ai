@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, ForbiddenException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -23,6 +23,12 @@ export class FilesService implements OnModuleInit {
   private readonly s3Client: S3Client;
   private readonly presignS3Client: S3Client;
   private readonly bucketName: string;
+
+  private assertOwner(file: { userId: string | null }, userId?: string) {
+    if (userId && file.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this file');
+    }
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -177,9 +183,10 @@ export class FilesService implements OnModuleInit {
     };
   }
 
-  async presignPartUpload(fileId: string, uploadId: string, partNumber: number) {
+  async presignPartUpload(fileId: string, uploadId: string, partNumber: number, userId?: string) {
     const file = await this.prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!file) throw new NotFoundException('File record not found');
+    this.assertOwner(file, userId);
 
     const command = new UploadPartCommand({
       Bucket: this.bucketName,
@@ -196,9 +203,10 @@ export class FilesService implements OnModuleInit {
     };
   }
 
-  async completeMultipartUpload(dto: CompleteMultipartDto) {
+  async completeMultipartUpload(dto: CompleteMultipartDto, userId?: string) {
     const file = await this.prisma.fileRecord.findUnique({ where: { id: dto.fileId } });
     if (!file) throw new NotFoundException('File record not found');
+    this.assertOwner(file, userId);
 
     const command = new CompleteMultipartUploadCommand({
       Bucket: this.bucketName,
@@ -226,9 +234,10 @@ export class FilesService implements OnModuleInit {
     };
   }
 
-  async abortMultipartUpload(fileId: string, uploadId: string) {
+  async abortMultipartUpload(fileId: string, uploadId: string, userId?: string) {
     const file = await this.prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!file) return;
+    this.assertOwner(file, userId);
 
     try {
       await this.s3Client.send(
@@ -242,15 +251,16 @@ export class FilesService implements OnModuleInit {
       // Ignore
     }
 
-    await this.deleteFile(fileId);
+    await this.deleteFile(fileId, userId);
     return { success: true, message: 'Multipart upload aborted' };
   }
 
-  async confirmUpload(fileId: string) {
+  async confirmUpload(fileId: string, userId?: string) {
     const file = await this.prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!file) {
       throw new NotFoundException('File record not found');
     }
+    this.assertOwner(file, userId);
 
     const updated = await this.prisma.fileRecord.update({
       where: { id: fileId },
@@ -263,11 +273,12 @@ export class FilesService implements OnModuleInit {
     return { success: true, file: updated };
   }
 
-  async generatePresignedDownload(fileId: string, ttlSeconds = 900) {
+  async generatePresignedDownload(fileId: string, ttlSeconds = 900, userId?: string) {
     const file = await this.prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!file) {
       throw new NotFoundException('File not found');
     }
+    this.assertOwner(file, userId);
 
     const command = new GetObjectCommand({
       Bucket: this.bucketName,
@@ -297,9 +308,10 @@ export class FilesService implements OnModuleInit {
     };
   }
 
-  async deleteFile(fileId: string) {
+  async deleteFile(fileId: string, userId?: string) {
     const file = await this.prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!file) return;
+    this.assertOwner(file, userId);
 
     try {
       await this.s3Client.send(

@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, UseGuards, Optional, Res } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, UseGuards, Optional, Res, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
 import { PdfJobsService } from './pdf-jobs.service';
@@ -12,6 +12,7 @@ export class PdfJobsController {
   constructor(private readonly pdfJobsService: PdfJobsService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Dispatch a new PDF processing or conversion task' })
   async createJob(
     @Body() dto: CreatePdfJobDto,
@@ -21,15 +22,17 @@ export class PdfJobsController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Query job status, progress percentage, and output download link' })
-  async getJobStatus(@Param('id') id: string) {
-    return this.pdfJobsService.getJobStatus(id);
+  async getJobStatus(@Param('id') id: string, @CurrentUser('sub') userId: string) {
+    return this.pdfJobsService.getJobStatus(id, userId);
   }
 
   @Get(':id/download')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Stream and download processed output file for a job' })
-  async downloadJobOutput(@Param('id') id: string, @Res() res: Response) {
-    const { stream, fileName, contentType } = await this.pdfJobsService.getJobOutputStream(id);
+  async downloadJobOutput(@Param('id') id: string, @Res() res: Response, @CurrentUser('sub') userId: string) {
+    const { stream, fileName, contentType } = await this.pdfJobsService.getJobOutputStream(id, userId);
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
     (stream as any).pipe(res);
@@ -37,20 +40,23 @@ export class PdfJobsController {
 
   @Post('callback')
   @ApiOperation({ summary: 'Internal worker webhook endpoint to report job completion/failure' })
-  async workerCallback(@Body() dto: WorkerCallbackDto) {
+  async workerCallback(@Body() dto: WorkerCallbackDto, @Headers('x-pdfforge-worker-secret') secret: string) {
+    this.pdfJobsService.verifyWorkerCallbackSecret(secret);
     return this.pdfJobsService.handleWorkerCallback(dto);
   }
 
   @Post(':id/cancel')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Cancel an active or queued processing job' })
-  async cancelJob(@Param('id') id: string) {
-    return this.pdfJobsService.cancelJob(id);
+  async cancelJob(@Param('id') id: string, @CurrentUser('sub') userId: string) {
+    return this.pdfJobsService.cancelJob(id, userId);
   }
 
   @Post(':id/retry')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Manually retry a failed or stalled processing job' })
-  async retryJob(@Param('id') id: string) {
-    return this.pdfJobsService.retryJob(id);
+  async retryJob(@Param('id') id: string, @CurrentUser('sub') userId: string) {
+    return this.pdfJobsService.retryJob(id, userId);
   }
 
   @UseGuards(JwtAuthGuard)

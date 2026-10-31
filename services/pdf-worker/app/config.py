@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     # Working Directories
     TMP_STORAGE_DIR: str = os.getenv("TMP_STORAGE_DIR", "/tmp/pdfforge")
+    WORKER_CALLBACK_SECRET: str = os.getenv("WORKER_CALLBACK_SECRET", "pdfforge-worker-internal-secret")
 
     if SettingsConfigDict:
         model_config = SettingsConfigDict(env_file=".env", extra="ignore")

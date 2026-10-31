@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { FilesService } from './files.service';
 import { FilesController } from './files.controller';
 import { PrismaService } from '../prisma/prisma.service';
+import { JwtModule } from '@nestjs/jwt';
 
 @Module({
+  imports: [JwtModule.register({})],
   controllers: [FilesController],
   providers: [FilesService, PrismaService],
   exports: [FilesService],

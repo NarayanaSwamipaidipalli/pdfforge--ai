@@ -44,6 +44,7 @@ export class InitiateMultipartDto {
 
   @ApiProperty({ example: 450000000, description: 'File size in bytes' })
   @IsNumber()
+  @Max(524288000) // 500 MB max limit
   fileSizeBytes: number;
 
   @ApiProperty({ example: 'application/pdf' })

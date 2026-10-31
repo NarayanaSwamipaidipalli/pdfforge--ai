@@ -64,13 +64,8 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                     downloaded = True
                 except Exception as s3_err:
                     print(f"Could not download from S3 {s3_key}: {s3_err}")
-            if not downloaded and not os.path.exists(local_path):
-                import pymupdf
-                doc = pymupdf.open()
-                page = doc.new_page()
-                page.insert_text(pymupdf.Point(72, 72), f"PDFForge AI: {clean_name}", fontsize=20)
-                doc.save(local_path)
-                doc.close()
+            if not downloaded:
+                raise FileNotFoundError(f"Unable to download input file {s3_key or raw_name}")
             input_paths.append(local_path)
             
         output_file_name = f"result_{job_id}.pdf"
@@ -258,6 +253,7 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                         "outputFileSizeBytes": file_size_bytes,
                         "durationMs": duration_ms
                     },
+                    headers={"x-pdfforge-worker-secret": settings.WORKER_CALLBACK_SECRET},
                     timeout=5.0
                 )
             except Exception as cb_err:
@@ -283,8 +279,13 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                         "errorMessage": str(exc),
                         "durationMs": duration_ms
                     },
+                    headers={"x-pdfforge-worker-secret": settings.WORKER_CALLBACK_SECRET},
                     timeout=5.0
                 )
             except Exception:
                 pass
         raise self.retry(exc=exc)
+    finally:
+        import shutil
+        if os.path.isdir(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)

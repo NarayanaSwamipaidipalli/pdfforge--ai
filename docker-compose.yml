@@ -85,6 +85,7 @@ services:
       AWS_SECRET_ACCESS_KEY: minioadmin
       S3_BUCKET_NAME: pdfforge-documents
       PDF_WORKER_URL: http://pdf-worker:8000
+      WORKER_CALLBACK_SECRET: pdfforge-worker-internal-secret
       OLLAMA_BASE_URL: http://ollama:11434
       JWT_SECRET: pdfforge-enterprise-jwt-super-secret-key-2026
     ports:
@@ -112,6 +113,7 @@ services:
       AWS_SECRET_ACCESS_KEY: minioadmin
       S3_BUCKET_NAME: pdfforge-documents
       PYTHONWARNINGS: "ignore::FutureWarning:fitz"
+      WORKER_CALLBACK_SECRET: pdfforge-worker-internal-secret
     ports:
       - "8000:8000"
     depends_on:
@@ -135,6 +137,7 @@ services:
       AWS_SECRET_ACCESS_KEY: minioadmin
       S3_BUCKET_NAME: pdfforge-documents
       PYTHONWARNINGS: "ignore::FutureWarning:fitz"
+      WORKER_CALLBACK_SECRET: pdfforge-worker-internal-secret
     depends_on:
       - redis
       - pdf-worker

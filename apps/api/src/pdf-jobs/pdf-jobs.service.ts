@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { FilesService } from '../files/files.service';
@@ -21,7 +21,10 @@ export class PdfJobsService {
   async createJob(dto: CreatePdfJobDto, userId?: string, orgId?: string) {
     // 1. Verify files exist in storage
     const files = await this.prisma.fileRecord.findMany({
-      where: { id: { in: dto.fileIds } },
+      where: {
+        id: { in: dto.fileIds },
+        ...(userId ? { userId } : {}),
+      },
     });
 
     if (files.length !== dto.fileIds.length) {
@@ -73,13 +76,16 @@ export class PdfJobsService {
     };
   }
 
-  async getJobStatus(jobId: string) {
+  async getJobStatus(jobId: string, userId?: string) {
     const job = await this.prisma.processingJob.findUnique({
       where: { id: jobId },
     });
 
     if (!job) {
       throw new NotFoundException(`Processing job ${jobId} not found`);
+    }
+    if (userId && job.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this job');
     }
 
     let downloadUrl: string | null = null;
@@ -104,13 +110,16 @@ export class PdfJobsService {
     };
   }
 
-  async getJobOutputStream(jobId: string) {
+  async getJobOutputStream(jobId: string, userId?: string) {
     const job = await this.prisma.processingJob.findUnique({
       where: { id: jobId },
     });
 
     if (!job) {
       throw new NotFoundException(`Processing job ${jobId} not found`);
+    }
+    if (userId && job.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this job');
     }
 
     if (job.status !== 'COMPLETED' || !job.outputFileKey) {
@@ -202,9 +211,17 @@ export class PdfJobsService {
     return { success: true, job: updated };
   }
 
-  async cancelJob(jobId: string) {
+  verifyWorkerCallbackSecret(secret?: string) {
+    const expected = this.configService.get<string>('WORKER_CALLBACK_SECRET', 'pdfforge-worker-internal-secret');
+    if (!secret || secret !== expected) {
+      throw new UnauthorizedException('Invalid worker callback secret');
+    }
+  }
+
+  async cancelJob(jobId: string, userId?: string) {
     const job = await this.prisma.processingJob.findUnique({ where: { id: jobId } });
     if (!job) throw new NotFoundException('Job not found');
+    if (userId && job.userId !== userId) throw new ForbiddenException('You do not have access to this job');
 
     if (job.status === 'COMPLETED' || job.status === 'FAILED') {
       throw new BadRequestException(`Cannot cancel a job that is already ${job.status}`);
@@ -216,9 +233,10 @@ export class PdfJobsService {
     });
   }
 
-  async retryJob(jobId: string) {
+  async retryJob(jobId: string, userId?: string) {
     const job = await this.prisma.processingJob.findUnique({ where: { id: jobId } });
     if (!job) throw new NotFoundException('Job not found');
+    if (userId && job.userId !== userId) throw new ForbiddenException('You do not have access to this job');
 
     if (job.status === 'PROCESSING') {
       throw new BadRequestException('Job is currently being processed');
