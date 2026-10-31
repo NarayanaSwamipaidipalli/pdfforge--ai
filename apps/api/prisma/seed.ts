@@ -6,35 +6,93 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting PDFForge AI Enterprise database seed...');
 
-  // 1. Create Super Admin User
-  const salt = await bcrypt.genSalt(10);
-  const adminPasswordHash = await bcrypt.hash('AdminPassword123!', salt);
-  const userPasswordHash = await bcrypt.hash('UserPassword123!', salt);
+  // Configuration via environment variables with secure production-ready defaults
+  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@pdfforge.ai').toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD || 'AdminPassword123!';
+  const adminName = process.env.ADMIN_NAME || 'Global System Administrator';
+
+  const proEmail = (process.env.PRO_USER_EMAIL || 'alex.morgan@enterprise.com').toLowerCase();
+  const proPassword = process.env.PRO_USER_PASSWORD || 'UserPassword123!';
+  const proName = process.env.PRO_USER_NAME || 'Alex Morgan';
+
+  // 1. Create or Update Super Admin User
+  const salt = await bcrypt.genSalt(12);
+  const adminPasswordHash = await bcrypt.hash(adminPassword, salt);
+  const proPasswordHash = await bcrypt.hash(proPassword, salt);
 
   const superAdmin = await prisma.user.upsert({
-    where: { email: 'admin@pdfforge.ai' },
-    update: {},
-    create: {
-      email: 'admin@pdfforge.ai',
-      name: 'Global System Administrator',
+    where: { email: adminEmail },
+    update: {
+      name: adminName,
       passwordHash: adminPasswordHash,
       globalRole: GlobalRole.SUPERADMIN,
       plan: PlanTier.ENTERPRISE,
       isEmailVerified: true,
-      storageUsedBytes: BigInt(104857600), // 100 MB
+    },
+    create: {
+      email: adminEmail,
+      name: adminName,
+      passwordHash: adminPasswordHash,
+      globalRole: GlobalRole.SUPERADMIN,
+      plan: PlanTier.ENTERPRISE,
+      isEmailVerified: true,
+      storageUsedBytes: BigInt(104857600), // 100 MB initial
     },
   });
 
-  console.log(`✅ SuperAdmin user seeded: ${superAdmin.email}`);
+  console.log(`✅ SuperAdmin user seeded: ${superAdmin.email} (Role: ${superAdmin.globalRole})`);
 
-  // 2. Create Pro User
-  const proUser = await prisma.user.upsert({
-    where: { email: 'alex.morgan@enterprise.com' },
-    update: {},
+  // Admin Workspace
+  const adminOrgSlug = `${adminEmail.split('@')[0]}-admin-workspace`;
+  const adminOrg = await prisma.organization.upsert({
+    where: { slug: adminOrgSlug },
+    update: {
+      ownerId: superAdmin.id,
+      plan: PlanTier.ENTERPRISE,
+    },
     create: {
-      email: 'alex.morgan@enterprise.com',
-      name: 'Alex Morgan',
-      passwordHash: userPasswordHash,
+      name: `${adminName}'s Workspace`,
+      slug: adminOrgSlug,
+      ownerId: superAdmin.id,
+      plan: PlanTier.ENTERPRISE,
+      storageLimitBytes: BigInt(107374182400), // 100 GB
+      storageUsedBytes: BigInt(0),
+      monthlyJobsLimit: 50000,
+      jobsUsedThisMonth: 0,
+    },
+  });
+
+  await prisma.organizationMember.upsert({
+    where: {
+      orgId_userId: {
+        orgId: adminOrg.id,
+        userId: superAdmin.id,
+      },
+    },
+    update: {
+      role: OrgRole.OWNER,
+    },
+    create: {
+      orgId: adminOrg.id,
+      userId: superAdmin.id,
+      role: OrgRole.OWNER,
+    },
+  });
+
+  // 2. Create or Update Pro User
+  const proUser = await prisma.user.upsert({
+    where: { email: proEmail },
+    update: {
+      name: proName,
+      passwordHash: proPasswordHash,
+      globalRole: GlobalRole.USER,
+      plan: PlanTier.PRO,
+      isEmailVerified: true,
+    },
+    create: {
+      email: proEmail,
+      name: proName,
+      passwordHash: proPasswordHash,
       globalRole: GlobalRole.USER,
       plan: PlanTier.PRO,
       isEmailVerified: true,
@@ -43,12 +101,15 @@ async function main() {
     },
   });
 
-  console.log(`✅ Pro user seeded: ${proUser.email}`);
+  console.log(`✅ Pro user seeded: ${proUser.email} (Role: ${proUser.globalRole})`);
 
-  // 3. Create Enterprise Organization Workspace
+  // 3. Create or Update Enterprise Organization Workspace
   const enterpriseOrg = await prisma.organization.upsert({
     where: { slug: 'apex-global-legal' },
-    update: {},
+    update: {
+      ownerId: proUser.id,
+      plan: PlanTier.BUSINESS,
+    },
     create: {
       name: 'Apex Global Legal & Compliance',
       slug: 'apex-global-legal',
@@ -61,7 +122,6 @@ async function main() {
     },
   });
 
-  // Assign Organization Membership
   await prisma.organizationMember.upsert({
     where: {
       orgId_userId: {
@@ -69,7 +129,9 @@ async function main() {
         userId: proUser.id,
       },
     },
-    update: {},
+    update: {
+      role: OrgRole.OWNER,
+    },
     create: {
       orgId: enterpriseOrg.id,
       userId: proUser.id,
@@ -79,10 +141,16 @@ async function main() {
 
   console.log(`✅ Enterprise Workspace seeded: ${enterpriseOrg.name}`);
 
-  // 4. Create Active Subscription Record
+  // 4. Create or Update Active Subscription Record
   await prisma.subscription.upsert({
     where: { stripeSubscriptionId: 'sub_enterprise_apex_2026' },
-    update: {},
+    update: {
+      userId: proUser.id,
+      orgId: enterpriseOrg.id,
+      plan: PlanTier.BUSINESS,
+      status: 'ACTIVE',
+      provider: 'stripe',
+    },
     create: {
       userId: proUser.id,
       orgId: enterpriseOrg.id,
@@ -96,10 +164,13 @@ async function main() {
     },
   });
 
-  // 5. Seed Demonstration PDF File Records
+  // 5. Seed Demonstration PDF File Record
   const sampleFile = await prisma.fileRecord.upsert({
     where: { storedKey: 'uploads/2026-10-16/master_services_agreement.pdf' },
-    update: {},
+    update: {
+      userId: proUser.id,
+      orgId: enterpriseOrg.id,
+    },
     create: {
       userId: proUser.id,
       orgId: enterpriseOrg.id,
@@ -115,42 +186,92 @@ async function main() {
     },
   });
 
-  // 6. Seed Demonstration Processing Jobs
-  await prisma.processingJob.create({
-    data: {
+  // 6. Seed Demonstration Processing Job (Idempotent check)
+  const existingJob = await prisma.processingJob.findFirst({
+    where: {
       userId: proUser.id,
-      orgId: enterpriseOrg.id,
-      tool: 'compress',
-      status: 'COMPLETED',
-      priority: 'HIGH',
-      inputFilesPayload: [{ fileId: sampleFile.id, name: sampleFile.originalName }],
-      parametersPayload: { compressionLevel: 'medium' },
       outputFileKey: 'processed/sample_compressed.pdf',
-      outputFileSizeBytes: BigInt(1153433), // 1.1 MB
-      progress: 100,
-      durationMs: 1420,
-      completedAt: new Date(),
     },
   });
 
-  // 7. Seed Production API Key
-  const keySalt = await bcrypt.genSalt(10);
-  const keyHash = await bcrypt.hash('pdf_live_9a87f10b83e4499d91f2e1320491a0c8', keySalt);
+  if (!existingJob) {
+    await prisma.processingJob.create({
+      data: {
+        userId: proUser.id,
+        orgId: enterpriseOrg.id,
+        tool: 'compress',
+        status: 'COMPLETED',
+        priority: 'HIGH',
+        inputFilesPayload: [{ fileId: sampleFile.id, name: sampleFile.originalName }],
+        parametersPayload: { compressionLevel: 'medium' },
+        outputFileKey: 'processed/sample_compressed.pdf',
+        outputFileSizeBytes: BigInt(1153433), // 1.1 MB
+        progress: 100,
+        durationMs: 1420,
+        completedAt: new Date(),
+      },
+    });
+  }
 
-  await prisma.apiKey.upsert({
-    where: { keyHash },
-    update: {},
-    create: {
+  // 7. Seed Production API Key (Idempotent check)
+  const existingKey = await prisma.apiKey.findFirst({
+    where: {
       userId: proUser.id,
-      orgId: enterpriseOrg.id,
-      name: 'Production Worker Key',
       keyPrefix: 'pdf_live_9a',
-      keyHash,
-      permissions: ['pdf:read', 'pdf:process', 'ai:query'],
-      rateLimitRpm: 300,
-      lastUsedAt: new Date(),
     },
   });
+
+  if (!existingKey) {
+    const keySalt = await bcrypt.genSalt(10);
+    const keyHash = await bcrypt.hash('pdf_live_9a87f10b83e4499d91f2e1320491a0c8', keySalt);
+
+    await prisma.apiKey.create({
+      data: {
+        userId: proUser.id,
+        orgId: enterpriseOrg.id,
+        name: 'Production Worker Key',
+        keyPrefix: 'pdf_live_9a',
+        keyHash,
+        permissions: ['pdf:read', 'pdf:process', 'ai:query'],
+        rateLimitRpm: 300,
+        lastUsedAt: new Date(),
+      },
+    });
+  }
+
+  // 8. Seed Promotional Coupons
+  const promotionalCoupons = [
+    {
+      code: 'WELCOME50',
+      discountPercent: 50,
+      maxUses: 1000,
+      isActive: true,
+    },
+    {
+      code: 'PRO2026',
+      discountPercent: 20,
+      maxUses: 500,
+      isActive: true,
+    },
+    {
+      code: 'ENTERPRISE100',
+      discountAmount: 100,
+      maxUses: 100,
+      isActive: true,
+    },
+  ];
+
+  if ((prisma as any).coupon) {
+    for (const coupon of promotionalCoupons) {
+      await (prisma as any).coupon.upsert({
+        where: { code: coupon.code },
+        update: {
+          isActive: coupon.isActive,
+        },
+        create: coupon,
+      });
+    }
+  }
 
   console.log('🚀 Database seeding finished successfully.');
 }

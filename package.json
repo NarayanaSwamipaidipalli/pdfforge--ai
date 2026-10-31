@@ -1,4 +1,12 @@
 {
+  "scripts": {
+    "seed": "node apps/api/prisma/seed.js",
+    "prisma:seed": "prisma db seed --schema=apps/api/prisma/schema.prisma"
+  },
+  "prisma": {
+    "schema": "apps/api/prisma/schema.prisma",
+    "seed": "node apps/api/prisma/seed.js"
+  },
   "devDependencies": {
     "prisma": "^5.22.0"
   },

@@ -6,7 +6,7 @@ import { Response } from 'express';
 import axios from 'axios';
 
 @ApiTags('System & Health')
-@Controller('health')
+@Controller(['health', 'api/v1/health'])
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,

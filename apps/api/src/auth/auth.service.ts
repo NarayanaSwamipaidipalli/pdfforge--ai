@@ -1,4 +1,12 @@
-import { Injectable, UnauthorizedException, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+  OnModuleInit,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
@@ -7,12 +15,112 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto, LoginDto, CreateApiKeyDto } from './dto/auth.dto';
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
+
+  async onModuleInit() {
+    await this.ensureAdminAccount().catch((err) =>
+      this.logger.warn(`Admin account initialization warning: ${err.message}`),
+    );
+  }
+
+  async ensureAdminAccount() {
+    const adminEmail = (
+      this.configService.get<string>('ADMIN_EMAIL') ||
+      process.env.ADMIN_EMAIL ||
+      'admin@pdfforge.ai'
+    ).toLowerCase();
+    const adminPassword =
+      this.configService.get<string>('ADMIN_PASSWORD') ||
+      process.env.ADMIN_PASSWORD ||
+      'AdminPassword123!';
+    const adminName =
+      this.configService.get<string>('ADMIN_NAME') ||
+      process.env.ADMIN_NAME ||
+      'Global System Administrator';
+
+    try {
+      const existingAdmin = await this.prisma.user.findUnique({
+        where: { email: adminEmail },
+      });
+
+      if (!existingAdmin) {
+        const salt = await bcrypt.genSalt(12);
+        const passwordHash = await bcrypt.hash(adminPassword, salt);
+        const admin = await this.prisma.user.create({
+          data: {
+            email: adminEmail,
+            passwordHash,
+            name: adminName,
+            globalRole: 'SUPERADMIN',
+            plan: 'ENTERPRISE',
+            isEmailVerified: true,
+            isBanned: false,
+          },
+        });
+
+        const orgSlug = `${adminEmail.split('@')[0]}-admin-workspace`;
+        const org = await this.prisma.organization.upsert({
+          where: { slug: orgSlug },
+          update: { ownerId: admin.id },
+          create: {
+            name: `${adminName}'s Workspace`,
+            slug: orgSlug,
+            ownerId: admin.id,
+            plan: 'ENTERPRISE',
+            storageLimitBytes: BigInt(107374182400),
+          },
+        });
+
+        await this.prisma.organizationMember.upsert({
+          where: {
+            orgId_userId: {
+              orgId: org.id,
+              userId: admin.id,
+            },
+          },
+          update: { role: 'OWNER' },
+          create: {
+            orgId: org.id,
+            userId: admin.id,
+            role: 'OWNER',
+          },
+        });
+
+        this.logger.log(`Provisioned default enterprise admin account: ${adminEmail} (SUPERADMIN)`);
+      } else {
+        let needsUpdate = false;
+        const updateData: any = {};
+        if (existingAdmin.globalRole !== 'SUPERADMIN' && existingAdmin.globalRole !== 'ADMIN') {
+          updateData.globalRole = 'SUPERADMIN';
+          needsUpdate = true;
+        }
+        if (existingAdmin.isBanned) {
+          updateData.isBanned = false;
+          needsUpdate = true;
+        }
+        if (!existingAdmin.isEmailVerified) {
+          updateData.isEmailVerified = true;
+          needsUpdate = true;
+        }
+        if (needsUpdate) {
+          await this.prisma.user.update({
+            where: { id: existingAdmin.id },
+            data: updateData,
+          });
+          this.logger.log(`Upgraded default enterprise admin account: ${adminEmail}`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Deferred admin account check: ${err?.message || err}`);
+    }
+  }
 
   async register(dto: RegisterDto) {
     const existing = await this.prisma.user.findUnique({
