@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
 import {
   FileText,
@@ -79,7 +80,14 @@ interface InvoiceItem {
 }
 
 export default function DashboardPage() {
-  const { user, token, isAuthenticated, syncProfile } = useAuthStore();
+  const router = useRouter();
+  const { user, token, isAuthenticated, isHydrated, syncProfile } = useAuthStore();
+
+  useEffect(() => {
+    if (isHydrated && !isAuthenticated && !token && typeof window !== 'undefined' && !localStorage.getItem('pdfforge_token')) {
+      router.push('/login?redirect=/dashboard');
+    }
+  }, [isHydrated, isAuthenticated, token, router]);
   const [activeTab, setActiveTab] = useState<'jobs' | 'subscription' | 'keys' | 'security'>('jobs');
 
   const [jobs, setJobs] = useState<UserJob[]>([]);

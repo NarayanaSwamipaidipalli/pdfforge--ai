@@ -3,6 +3,7 @@ import {
   Post,
   Body,
   Get,
+  Patch,
   Delete,
   Param,
   Query,
@@ -28,6 +29,9 @@ import {
   TwoFactorVerifyDto,
   CreateApiKeyDto,
   ChangePasswordDto,
+  UpdateProfileDto,
+  ConnectGoogleDto,
+  DeleteAccountDto,
 } from './dto/auth.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/roles.decorator';
@@ -356,5 +360,57 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke all other active user sessions' })
   async revokeAllOtherSessions(@CurrentUser('sub') userId: string) {
     return this.authService.revokeAllOtherSessions(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Patch('profile')
+  @ApiOperation({ summary: 'Update profile details (name, avatarUrl)' })
+  async updateProfile(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(userId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('google/connect')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Link Google account to existing user' })
+  async connectGoogle(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: ConnectGoogleDto,
+  ) {
+    return this.authService.connectGoogle(userId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('google/disconnect')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Disconnect Google account from user' })
+  async disconnectGoogle(@CurrentUser('sub') userId: string) {
+    return this.authService.disconnectGoogle(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Delete('account')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Permanently delete current user account' })
+  async deleteAccount(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: DeleteAccountDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.deleteAccount(userId, dto);
+    res.clearCookie('pdfforge_refresh_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+    return result;
   }
 }

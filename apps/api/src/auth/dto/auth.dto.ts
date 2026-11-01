@@ -128,3 +128,49 @@ export class RevokeSessionDto {
   @IsNotEmpty()
   sessionId: string;
 }
+
+export class UpdateProfileDto {
+  @ApiProperty({ example: 'Alex Mercer', required: false })
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @ApiProperty({ example: 'https://images.unsplash.com/...', required: false })
+  @IsString()
+  @IsOptional()
+  avatarUrl?: string;
+}
+
+export class ConnectGoogleDto {
+  @ApiProperty({ description: 'Google OAuth id_token or credential token', required: false })
+  @IsString()
+  @IsOptional()
+  idToken?: string;
+
+  @ApiProperty({ description: 'Google Identity Services credential', required: false })
+  @IsString()
+  @IsOptional()
+  credential?: string;
+
+  @ApiProperty({ description: 'Google OAuth 2.0 authorization code', required: false })
+  @IsString()
+  @IsOptional()
+  code?: string;
+
+  @ApiProperty({ description: 'Redirect URI used during authorization code flow', required: false })
+  @IsString()
+  @IsOptional()
+  redirectUri?: string;
+}
+
+export class DeleteAccountDto {
+  @ApiProperty({ example: 'P@ssword123!', required: false })
+  @IsString()
+  @IsOptional()
+  password?: string;
+
+  @ApiProperty({ example: 'DELETE', required: true })
+  @IsString()
+  @IsNotEmpty()
+  confirmation: string;
+}

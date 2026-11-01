@@ -14,7 +14,14 @@ import * as crypto from 'crypto';
 import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../prisma/prisma.service';
-import { RegisterDto, LoginDto, CreateApiKeyDto } from './dto/auth.dto';
+import {
+  RegisterDto,
+  LoginDto,
+  CreateApiKeyDto,
+  UpdateProfileDto,
+  ConnectGoogleDto,
+  DeleteAccountDto,
+} from './dto/auth.dto';
 
 export interface GoogleVerifiedPayload {
   googleId: string;
@@ -934,6 +941,142 @@ export class AuthService implements OnModuleInit {
       data: { passwordHash, refreshTokenHash: null },
     });
     return { success: true, message: 'Password changed successfully. Please log in again.' };
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User profile not found');
+    }
+    const updateData: any = {};
+    if (dto.name !== undefined) updateData.name = dto.name.trim();
+    if (dto.avatarUrl !== undefined) updateData.avatarUrl = dto.avatarUrl.trim();
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      include: {
+        memberships: {
+          include: {
+            organization: true,
+          },
+        },
+      },
+    });
+
+    const { passwordHash, refreshTokenHash, twoFactorSecret, ...profile } = updated;
+    return profile;
+  }
+
+  async connectGoogle(userId: string, dto: ConnectGoogleDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User profile not found');
+    }
+
+    let verifiedPayload: GoogleVerifiedPayload;
+
+    if (dto.code) {
+      verifiedPayload = await this.exchangeGoogleCode(dto.code, dto.redirectUri);
+    } else {
+      const rawToken = dto.idToken || dto.credential;
+      if (!rawToken) {
+        throw new BadRequestException('Missing Google credential, id_token, or code');
+      }
+      verifiedPayload = await this.verifyGoogleToken(rawToken);
+    }
+
+    const existingGoogleUser = await this.prisma.user.findUnique({
+      where: { googleId: verifiedPayload.googleId },
+    });
+    if (existingGoogleUser && existingGoogleUser.id !== userId) {
+      throw new ConflictException('This Google account is already linked to another user.');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        googleId: verifiedPayload.googleId,
+        provider: user.passwordHash ? 'GOOGLE_AND_LOCAL' : 'GOOGLE',
+        avatarUrl: user.avatarUrl || verifiedPayload.picture,
+        isEmailVerified: true,
+      },
+    });
+
+    const { passwordHash, refreshTokenHash, twoFactorSecret, ...profile } = updated;
+    return { success: true, message: 'Google account linked successfully', user: profile };
+  }
+
+  async disconnectGoogle(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User profile not found');
+    }
+    if (!user.googleId) {
+      throw new BadRequestException('No Google account is currently linked');
+    }
+    if (!user.passwordHash) {
+      throw new BadRequestException('Cannot disconnect Google account without setting a local password first.');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        googleId: null,
+        provider: 'LOCAL',
+      },
+    });
+
+    const { passwordHash, refreshTokenHash, twoFactorSecret, ...profile } = updated;
+    return { success: true, message: 'Google account disconnected successfully', user: profile };
+  }
+
+  async deleteAccount(userId: string, dto: DeleteAccountDto) {
+    if (dto.confirmation !== 'DELETE') {
+      throw new BadRequestException('Must provide exact confirmation string "DELETE"');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User profile not found');
+    }
+    if (user.passwordHash) {
+      if (!dto.password) {
+        throw new BadRequestException('Password confirmation is required to delete this account');
+      }
+      const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
+      if (!isMatch) {
+        throw new UnauthorizedException('Incorrect password');
+      }
+    }
+
+    // Find organizations owned by this user
+    const ownedOrgs = await this.prisma.organization.findMany({
+      where: { ownerId: userId },
+      select: { id: true },
+    });
+    const orgIds = ownedOrgs.map((o) => o.id);
+
+    await this.prisma.$transaction([
+      ...(orgIds.length > 0
+        ? [
+            this.prisma.organizationMember.deleteMany({ where: { orgId: { in: orgIds } } }),
+            this.prisma.apiKey.deleteMany({ where: { orgId: { in: orgIds } } }),
+            this.prisma.fileRecord.deleteMany({ where: { orgId: { in: orgIds } } }),
+            this.prisma.processingJob.deleteMany({ where: { orgId: { in: orgIds } } }),
+            this.prisma.subscription.deleteMany({ where: { orgId: { in: orgIds } } }),
+            this.prisma.organization.deleteMany({ where: { id: { in: orgIds } } }),
+          ]
+        : []),
+      this.prisma.userSession.deleteMany({ where: { userId } }),
+      this.prisma.apiKey.deleteMany({ where: { userId } }),
+      this.prisma.auditLog.deleteMany({ where: { userId } }),
+      this.prisma.processingJob.deleteMany({ where: { userId } }),
+      this.prisma.fileRecord.deleteMany({ where: { userId } }),
+      this.prisma.organizationMember.deleteMany({ where: { userId } }),
+      this.prisma.user.delete({ where: { id: userId } }),
+    ]);
+
+    return { success: true, message: 'Account permanently deleted' };
   }
 
   private async generateTokens(userId: string, email: string, role: string) {

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
 import { useToast } from '@/components/ui/Toast';
 import { Modal } from '@/components/ui/Modal';
@@ -35,7 +36,14 @@ interface ApiKeyItem {
 }
 
 export default function SettingsPage() {
-  const { user, token, isAuthenticated, syncProfile, logout } = useAuthStore();
+  const router = useRouter();
+  const { user, token, isAuthenticated, isHydrated, syncProfile, logout } = useAuthStore();
+
+  useEffect(() => {
+    if (isHydrated && !isAuthenticated && !token && typeof window !== 'undefined' && !localStorage.getItem('pdfforge_token')) {
+      router.push('/login?redirect=/settings');
+    }
+  }, [isHydrated, isAuthenticated, token, router]);
   const { addToast } = useToast();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'apikeys' | 'notifications'>('profile');

@@ -44,7 +44,8 @@ function CallbackContent() {
 
         // Fetch full verified user profile from /auth/me
         await syncProfile();
-        router.push('/dashboard');
+        const isLinking = searchParams.get('link') === 'true';
+        router.push(isLinking ? '/account' : '/dashboard');
       } catch (err: any) {
         setError(err.message || 'Failed to initialize authenticated session.');
       }

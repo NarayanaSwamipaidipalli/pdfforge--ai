@@ -1,24 +1,43 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
-import { FileCheck2, ArrowRight, ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
+import {
+  FileCheck2,
+  ArrowRight,
+  ShieldCheck,
+  AlertCircle,
+  Loader2,
+  Eye,
+  EyeOff,
+  User,
+  Mail,
+  Lock,
+} from 'lucide-react';
 
 const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 const API_V1 = `${API_BASE}/api/v1`;
 
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter();
-  const { setAuth } = useAuthStore();
+  const { setAuth, isAuthenticated, isHydrated } = useAuthStore();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // If already authenticated, redirect
+  useEffect(() => {
+    if (isHydrated && isAuthenticated) {
+      router.push('/dashboard');
+    }
+  }, [isHydrated, isAuthenticated, router]);
 
   // Initialize Google Identity Services (GSI) for One Tap if configured
   useEffect(() => {
@@ -50,6 +69,7 @@ export default function RegisterPage() {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ idToken: response.credential }),
+                        credentials: 'include',
                       });
                       const authData = await authRes.json();
                       if (!authRes.ok) throw new Error(authData.message || 'Google registration failed');
@@ -61,6 +81,13 @@ export default function RegisterPage() {
                           name: authData.user.name,
                           role: authData.user.role || authData.user.globalRole || 'USER',
                           plan: authData.user.plan || 'FREE',
+                          avatarUrl: authData.user.avatarUrl || null,
+                          provider: authData.user.provider || 'GOOGLE',
+                          googleId: authData.user.googleId || null,
+                          isEmailVerified: authData.user.isEmailVerified ?? true,
+                          storageUsedBytes: authData.user.storageUsedBytes || 0,
+                          storageLimitBytes: authData.user.storageLimitBytes || (1024 * 1024 * 1024),
+                          createdAt: authData.user.createdAt,
                         },
                         authData.tokens.accessToken,
                       );
@@ -92,6 +119,11 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (password.length < 8) {
+      setError('Password must contain at least 8 characters');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -99,7 +131,8 @@ export default function RegisterPage() {
       const res = await fetch(`${API_V1}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name }),
+        body: JSON.stringify({ email: email.trim(), password, name: name.trim() || undefined }),
+        credentials: 'include',
       });
 
       const data = await res.json();
@@ -113,8 +146,15 @@ export default function RegisterPage() {
           id: data.user.id,
           email: data.user.email,
           name: data.user.name,
-          role: data.user.role || 'USER',
+          role: data.user.role || data.user.globalRole || 'USER',
           plan: data.user.plan || 'FREE',
+          avatarUrl: data.user.avatarUrl || null,
+          provider: data.user.provider || 'LOCAL',
+          googleId: data.user.googleId || null,
+          isEmailVerified: data.user.isEmailVerified ?? false,
+          storageUsedBytes: data.user.storageUsedBytes || 0,
+          storageLimitBytes: data.user.storageLimitBytes || (1024 * 1024 * 1024),
+          createdAt: data.user.createdAt,
         },
         data.tokens.accessToken,
       );
@@ -138,56 +178,57 @@ export default function RegisterPage() {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        throw new Error('Google OAuth is not configured on the server. Please set GOOGLE_CLIENT_ID.');
+        throw new Error('Google authorization link unavailable');
       }
     } catch (err: any) {
-      setError(err.message || 'Could not initiate Google sign up');
+      setError(err.message || 'Failed to start Google sign up');
       setGoogleLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#fbfbfd] flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[#fbfbfd] dark:bg-black flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+      {/* Brand Header */}
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
         <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
             <FileCheck2 className="w-6 h-6" />
           </div>
-          <span className="font-semibold text-xl tracking-tight text-zinc-900">
-            PDFForge AI
+          <span className="font-semibold text-xl tracking-tight text-zinc-900 dark:text-white flex items-center gap-1.5">
+            PDFForge <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-medium border border-blue-200 dark:border-blue-900">AI</span>
           </span>
         </Link>
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-900">
+        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
           Create your free account
-        </h2>
-        <p className="mt-1 text-xs text-zinc-500">
+        </h1>
+        <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
           Already have an account?{' '}
-          <Link href="/login" className="text-blue-600 font-medium hover:underline">
+          <Link href="/login" className="text-blue-600 dark:text-blue-400 font-medium hover:underline">
             Sign in
           </Link>
         </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4">
-        <div className="bg-white py-8 px-6 sm:px-10 rounded-3xl border border-zinc-200 shadow-apple space-y-5">
+        <div className="bg-white dark:bg-zinc-900 py-8 px-6 sm:px-10 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
           {error && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
               <span>{error}</span>
             </div>
           )}
 
-          {/* Official Google Sign-Up Button */}
+          {/* REAL GOOGLE OAUTH 2.0 SIGNUP BUTTON */}
           <button
             type="button"
             onClick={handleGoogleAuth}
-            disabled={loading || googleLoading}
-            className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-zinc-200 hover:bg-zinc-50 text-xs font-semibold text-zinc-700 transition-colors shadow-sm disabled:opacity-60"
+            disabled={googleLoading}
+            className="w-full py-2.5 px-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold shadow-sm transition-all duration-200 flex items-center justify-center gap-2.5 disabled:opacity-60"
           >
             {googleLoading ? (
               <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
             ) : (
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                 <path
                   fill="#4285F4"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -209,55 +250,75 @@ export default function RegisterPage() {
             <span>{googleLoading ? 'Connecting to Google...' : 'Sign up with Google'}</span>
           </button>
 
-          <div className="relative flex items-center justify-center">
-            <div className="border-t border-zinc-200 w-full" />
-            <span className="bg-white px-3 text-[10px] text-zinc-400 uppercase tracking-wider">
-              Or with work email
-            </span>
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-zinc-200 dark:border-zinc-800" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="px-3 bg-white dark:bg-zinc-900 text-zinc-400">
+                or register with email
+              </span>
+            </div>
           </div>
 
+          {/* Registration Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1">
-                Full name
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                Full Name
               </label>
-              <input
-                type="text"
-                placeholder="Sarah Connor"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                required
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="e.g. Alex Chen"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all pr-9"
+                  required
+                />
+                <User className="w-3.5 h-3.5 text-zinc-400 absolute right-3 top-2.5" />
+              </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1">
-                Work email address
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                Work Email
               </label>
-              <input
-                type="email"
-                placeholder="sarah@corp.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                required
-              />
+              <div className="relative">
+                <input
+                  type="email"
+                  placeholder="name@company.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all pr-9"
+                  required
+                />
+                <Mail className="w-3.5 h-3.5 text-zinc-400 absolute right-3 top-2.5" />
+              </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1">
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                 Password
               </label>
-              <input
-                type="password"
-                placeholder="Minimum 8 characters"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                minLength={8}
-                required
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Min. 8 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all pr-9"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="p-1 text-zinc-400 hover:text-zinc-600 absolute right-2.5 top-2 focus:outline-none"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
 
             <button
@@ -265,17 +326,40 @@ export default function RegisterPage() {
               disabled={loading}
               className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5 disabled:opacity-60"
             >
-              <span>{loading ? 'Creating account...' : 'Start 14-Day Free Trial'}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              {loading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Creating Account...</span>
+                </>
+              ) : (
+                <>
+                  <span>Create Free Account</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </>
+              )}
             </button>
           </form>
 
-          <div className="pt-2 text-center text-[10px] text-zinc-400 flex items-center justify-center gap-1">
+          <div className="pt-2 text-center text-[10px] text-zinc-400 flex items-center justify-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>GDPR, HIPAA & SOC2 Compliant · No Credit Card Required</span>
+            <span>Zero Data Selling &bull; 100% Private Document Processing</span>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-[#fbfbfd] dark:bg-black">
+          <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+        </div>
+      }
+    >
+      <RegisterForm />
+    </Suspense>
   );
 }
