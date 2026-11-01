@@ -165,6 +165,9 @@ model Subscription {
   stripeCustomerId       String?            @unique
   stripeSubscriptionId   String?            @unique
   razorpaySubscriptionId String?            @unique
+  paypalSubscriptionId   String?            @unique
+  interval               String             @default("monthly") // "monthly" | "yearly"
+  trialEndsAt            DateTime?
   
   currentPeriodStart     DateTime
   currentPeriodEnd       DateTime
@@ -435,4 +438,18 @@ model Coupon {
 
   @@index([code])
   @@map("coupons")
+}
+
+model WebhookEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  provider    String
+  eventType   String
+  payload     Json?
+  processedAt DateTime @default(now())
+  status      String   @default("PROCESSED")
+
+  @@index([eventId])
+  @@index([provider])
+  @@map("webhook_events")
 }

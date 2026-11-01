@@ -4,7 +4,13 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import helmet from 'helmet';
-import * as Sentry from '@sentry/node';
+
+let Sentry: any = null;
+try {
+  Sentry = require('@sentry/node');
+} catch {
+  // Sentry monitoring is optional
+}
 
 const structuredLogger = {
   log(message: unknown, context?: string) {
@@ -40,12 +46,16 @@ function writeLog(level: string, message: unknown, context?: string, trace?: str
 
 async function bootstrap() {
   const sentryDsn = process.env.SENTRY_DSN;
-  if (sentryDsn) {
-    Sentry.init({
-      dsn: sentryDsn,
-      environment: process.env.NODE_ENV || 'development',
-      tracesSampleRate: 0.1,
-    });
+  if (sentryDsn && Sentry && typeof Sentry.init === 'function') {
+    try {
+      Sentry.init({
+        dsn: sentryDsn,
+        environment: process.env.NODE_ENV || 'development',
+        tracesSampleRate: 0.1,
+      });
+    } catch {
+      // Sentry initialization failed gracefully
+    }
   }
   // Support BigInt serialization in JSON responses
   (BigInt.prototype as any).toJSON = function () {

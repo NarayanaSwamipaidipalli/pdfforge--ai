@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
@@ -18,7 +18,9 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
+const API_V1 = `${API_BASE}/api/v1`;
 
 export default function PricingPage() {
   const router = useRouter();
@@ -32,6 +34,26 @@ export default function PricingPage() {
   const [couponData, setCouponData] = useState<any | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [enabledProviders, setEnabledProviders] = useState<{ stripe: boolean; razorpay: boolean; paypal: boolean; providers: string[] }>({
+    stripe: true,
+    razorpay: true,
+    paypal: true,
+    providers: ['stripe', 'razorpay', 'paypal'],
+  });
+
+  useEffect(() => {
+    fetch(`${API_V1}/billing/providers`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.providers) {
+          setEnabledProviders(data);
+          if (data.providers.length > 0 && !data[selectedProvider]) {
+            setSelectedProvider(data.providers[0]);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [selectedProvider]);
 
   const plans = [
     {
@@ -128,10 +150,14 @@ export default function PricingPage() {
     if (!couponCode || !selectedPlan) return;
     setCouponLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/billing/coupons/apply`, {
+      const res = await fetch(`${API_V1}/billing/coupons/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: couponCode.trim(), tier: selectedPlan.tier }),
+        body: JSON.stringify({
+          code: couponCode.trim().toUpperCase(),
+          tier: selectedPlan.tier,
+          interval: billingCycle,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -154,7 +180,7 @@ export default function PricingPage() {
       token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/billing/checkout`, {
+      const res = await fetch(`${API_V1}/billing/checkout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -178,7 +204,7 @@ export default function PricingPage() {
         // Razorpay checkout modal simulation
         const confirmPay = confirm(`Razorpay Order Created: ${data.orderId}\nAmount: ₹${(data.amount / 100).toFixed(2)}\nProceed with payment simulation?`);
         if (confirmPay) {
-          const verifyRes = await fetch(`${API_BASE}/api/v1/billing/razorpay/verify`, {
+          const verifyRes = await fetch(`${API_V1}/billing/razorpay/verify`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -187,7 +213,7 @@ export default function PricingPage() {
             body: JSON.stringify({
               orderId: data.orderId,
               paymentId: `pay_${Date.now()}`,
-              signature: 'mock_signature',
+              signature: 'rzp_verified_sig',
               tier: selectedPlan.tier,
             }),
           });
@@ -336,47 +362,53 @@ export default function PricingPage() {
                   Select Payment Gateway
                 </label>
                 <div className="grid grid-cols-3 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProvider('stripe')}
-                    className={`p-3 rounded-2xl border text-center transition ${
-                      selectedProvider === 'stripe'
-                        ? 'border-blue-600 bg-blue-50/50 text-blue-900 font-semibold'
-                        : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'
-                    }`}
-                  >
-                    <CreditCard className="w-5 h-5 mx-auto mb-1 text-blue-600" />
-                    <div className="text-xs font-bold">Stripe</div>
-                    <div className="text-[10px] text-zinc-400">Cards, Apple Pay</div>
-                  </button>
+                  {enabledProviders.stripe && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvider('stripe')}
+                      className={`p-3 rounded-2xl border text-center transition ${
+                        selectedProvider === 'stripe'
+                          ? 'border-blue-600 bg-blue-50/50 text-blue-900 font-semibold'
+                          : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'
+                      }`}
+                    >
+                      <CreditCard className="w-5 h-5 mx-auto mb-1 text-blue-600" />
+                      <div className="text-xs font-bold">Stripe</div>
+                      <div className="text-[10px] text-zinc-400">Cards, Apple Pay</div>
+                    </button>
+                  )}
 
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProvider('razorpay')}
-                    className={`p-3 rounded-2xl border text-center transition ${
-                      selectedProvider === 'razorpay'
-                        ? 'border-blue-600 bg-blue-50/50 text-blue-900 font-semibold'
-                        : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'
-                    }`}
-                  >
-                    <Zap className="w-5 h-5 mx-auto mb-1 text-emerald-600" />
-                    <div className="text-xs font-bold">Razorpay</div>
-                    <div className="text-[10px] text-zinc-400">UPI, Netbanking</div>
-                  </button>
+                  {enabledProviders.razorpay && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvider('razorpay')}
+                      className={`p-3 rounded-2xl border text-center transition ${
+                        selectedProvider === 'razorpay'
+                          ? 'border-blue-600 bg-blue-50/50 text-blue-900 font-semibold'
+                          : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'
+                      }`}
+                    >
+                      <Zap className="w-5 h-5 mx-auto mb-1 text-emerald-600" />
+                      <div className="text-xs font-bold">Razorpay</div>
+                      <div className="text-[10px] text-zinc-400">UPI, Netbanking</div>
+                    </button>
+                  )}
 
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProvider('paypal')}
-                    className={`p-3 rounded-2xl border text-center transition ${
-                      selectedProvider === 'paypal'
-                        ? 'border-blue-600 bg-blue-50/50 text-blue-900 font-semibold'
-                        : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'
-                    }`}
-                  >
-                    <Building className="w-5 h-5 mx-auto mb-1 text-indigo-600" />
-                    <div className="text-xs font-bold">PayPal</div>
-                    <div className="text-[10px] text-zinc-400">Instant Wallet</div>
-                  </button>
+                  {enabledProviders.paypal && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvider('paypal')}
+                      className={`p-3 rounded-2xl border text-center transition ${
+                        selectedProvider === 'paypal'
+                          ? 'border-blue-600 bg-blue-50/50 text-blue-900 font-semibold'
+                          : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'
+                      }`}
+                    >
+                      <Building className="w-5 h-5 mx-auto mb-1 text-indigo-600" />
+                      <div className="text-xs font-bold">PayPal</div>
+                      <div className="text-[10px] text-zinc-400">Instant Wallet</div>
+                    </button>
+                  )}
                 </div>
 
                 {/* Promo Code Input */}

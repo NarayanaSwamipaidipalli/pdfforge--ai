@@ -24,6 +24,12 @@ export class BillingController {
     return this.billingService.getPlansCatalog();
   }
 
+  @Get('providers')
+  @ApiOperation({ summary: 'Retrieve status of active payment providers (Stripe, Razorpay, PayPal)' })
+  getProviders() {
+    return this.billingService.getEnabledProviders();
+  }
+
   @Post('coupons/apply')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Validate and calculate discount for a promotional coupon' })
@@ -84,6 +90,15 @@ export class BillingController {
     return this.billingService.cancelSubscription(userId);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('subscription/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reactivate a scheduled cancellation before period end' })
+  async reactivateSubscription(@CurrentUser('sub') userId: string) {
+    return this.billingService.reactivateSubscription(userId);
+  }
+
   @Post('webhook/stripe')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Stripe webhook receiver for asynchronous subscription events' })
@@ -91,7 +106,8 @@ export class BillingController {
     @Req() req: Request,
     @Headers('stripe-signature') signature: string,
   ) {
-    const event = this.billingService.verifyStripeWebhook((req as any).rawBody, signature);
+    const rawBody = (req as any).rawBody;
+    const event = this.billingService.verifyStripeWebhook(rawBody, signature);
     return this.billingService.handleStripeWebhook(event);
   }
 
@@ -102,16 +118,20 @@ export class BillingController {
     @Req() req: Request,
     @Headers('x-razorpay-signature') signature: string,
   ) {
-    this.billingService.verifyRazorpayWebhook((req as any).rawBody, signature);
-    return { received: true };
+    const rawBody = (req as any).rawBody;
+    this.billingService.verifyRazorpayWebhook(rawBody, signature);
+    const event = rawBody ? JSON.parse(rawBody.toString('utf8')) : req.body;
+    return this.billingService.handleRazorpayWebhook(event);
   }
 
   @Post('webhook/paypal')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'PayPal webhook receiver' })
   async handlePayPalWebhook(@Req() req: Request, @Headers() headers: Record<string, string>) {
-    await this.billingService.verifyPayPalWebhook((req as any).rawBody, headers);
-    return { received: true };
+    const rawBody = (req as any).rawBody;
+    await this.billingService.verifyPayPalWebhook(rawBody, headers);
+    const event = rawBody ? JSON.parse(rawBody.toString('utf8')) : req.body;
+    return this.billingService.handlePayPalWebhook(event);
   }
 
   @UseGuards(JwtAuthGuard)
