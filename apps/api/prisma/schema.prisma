@@ -70,6 +70,8 @@ model User {
   avatarUrl        String?
   globalRole       GlobalRole   @default(USER)
   plan             PlanTier     @default(FREE)
+  provider         String?      @default("LOCAL")
+  googleId         String?      @unique
   isEmailVerified  Boolean      @default(false)
   emailVerificationToken     String?
   emailVerificationExpiresAt DateTime?

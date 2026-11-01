@@ -1,6 +1,20 @@
-import { Controller, Post, Body, Get, Delete, Param, UseGuards, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Delete,
+  Param,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Req,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import {
   RegisterDto,
@@ -24,37 +38,160 @@ import { Throttle } from '@nestjs/throttler';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  private parseCookies(cookieHeader?: string): Record<string, string> {
+    if (!cookieHeader) return {};
+    return cookieHeader.split(';').reduce((acc, c) => {
+      const [key, val] = c.trim().split('=');
+      if (key && val) acc[key] = decodeURIComponent(val);
+      return acc;
+    }, {} as Record<string, string>);
+  }
+
   @Post('register')
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiResponse({ status: 201, description: 'User successfully created' })
-  async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  async register(
+    @Body() dto: RegisterDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.register(dto);
+    res.cookie('pdfforge_refresh_token', result.tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+    return result;
   }
 
   @Post('login')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Authenticate user with email and password' })
   @ApiResponse({ status: 200, description: 'Successfully authenticated' })
-  async login(@Body() dto: LoginDto, @Req() req: Request) {
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const ip = (req.headers['x-forwarded-for'] as string) || req.ip || '127.0.0.1';
     const userAgent = (req.headers['user-agent'] as string) || 'Web Browser';
-    return this.authService.login(dto, ip, userAgent);
+    const result = await this.authService.login(dto, ip, userAgent);
+
+    res.cookie('pdfforge_refresh_token', result.tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
+    return result;
+  }
+
+  @Get('google/url')
+  @ApiOperation({ summary: 'Retrieve official Google OAuth 2.0 authorization URL' })
+  getGoogleAuthUrl(
+    @Query('state') state?: string,
+    @Query('redirect_uri') redirectUri?: string,
+  ) {
+    return {
+      url: this.authService.getGoogleAuthUrl(state, redirectUri),
+      clientId: this.authService.getGoogleClientId(),
+    };
+  }
+
+  @Get('google/callback')
+  @ApiOperation({ summary: 'Google OAuth 2.0 redirect callback' })
+  async googleCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Query('error') error: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const frontendUrl = this.authService.getFrontendUrl();
+    if (error) {
+      return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error)}`);
+    }
+    if (!code) {
+      return res.redirect(`${frontendUrl}/login?error=missing_authorization_code`);
+    }
+
+    try {
+      const ip = (req.headers['x-forwarded-for'] as string) || req.ip || '127.0.0.1';
+      const userAgent = (req.headers['user-agent'] as string) || 'Web Browser';
+      const result = await this.authService.googleAuth({ code }, ip, userAgent);
+
+      res.cookie('pdfforge_refresh_token', result.tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: '/',
+      });
+
+      return res.redirect(
+        `${frontendUrl}/auth/callback?token=${result.tokens.accessToken}&refreshToken=${result.tokens.refreshToken}&userId=${result.user.id}&plan=${result.user.plan}&role=${result.user.role}`,
+      );
+    } catch (err: any) {
+      return res.redirect(
+        `${frontendUrl}/login?error=${encodeURIComponent(err.message || 'Google authentication failed')}`,
+      );
+    }
   }
 
   @Post('google')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Authenticate via Google OAuth 2.0' })
-  async googleAuth(@Body() dto: GoogleAuthDto) {
-    return this.authService.googleAuth(dto.idToken);
+  @ApiOperation({ summary: 'Authenticate via Google OAuth 2.0 ID Token or Authorization Code' })
+  async googleAuth(
+    @Body() dto: GoogleAuthDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const ip = (req.headers['x-forwarded-for'] as string) || req.ip || '127.0.0.1';
+    const userAgent = (req.headers['user-agent'] as string) || 'Web Browser';
+
+    const result = await this.authService.googleAuth(
+      {
+        idToken: dto.idToken || dto.credential,
+        code: dto.code,
+        redirectUri: dto.redirectUri,
+      },
+      ip,
+      userAgent,
+    );
+
+    res.cookie('pdfforge_refresh_token', result.tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
+    return result;
   }
 
   @Post('github')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Authenticate via GitHub OAuth' })
-  async githubAuth(@Body() dto: GithubAuthDto) {
-    return this.authService.githubAuth(dto.code);
+  async githubAuth(
+    @Body() dto: GithubAuthDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.githubAuth(dto.code);
+    res.cookie('pdfforge_refresh_token', result.tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+    return result;
   }
 
   @Post('forgot-password')
@@ -123,17 +260,55 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh expired JWT access token' })
-  async refresh(@Body() dto: RefreshTokenDto, @CurrentUser('sub') userId: string) {
-    return this.authService.refreshTokens(userId, dto.refreshToken);
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const cookies = this.parseCookies(req.headers.cookie);
+    const refreshToken = dto.refreshToken || cookies['pdfforge_refresh_token'];
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is required');
+    }
+
+    const tokens = await this.authService.refreshTokens(refreshToken);
+
+    res.cookie('pdfforge_refresh_token', tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
+    return tokens;
   }
 
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Revoke active refresh token session' })
-  async logout(@CurrentUser('sub') userId: string) {
-    return this.authService.logout(userId);
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @CurrentUser('sub') userId?: string,
+  ) {
+    const cookies = this.parseCookies(req.headers.cookie);
+    const refreshToken = req.body?.refreshToken || cookies['pdfforge_refresh_token'];
+
+    if (refreshToken) {
+      await this.authService.logoutByToken(refreshToken).catch(() => {});
+    } else if (userId) {
+      await this.authService.logout(userId).catch(() => {});
+    }
+
+    res.clearCookie('pdfforge_refresh_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+
+    return { success: true, message: 'Logged out successfully' };
   }
 
   @UseGuards(JwtAuthGuard)

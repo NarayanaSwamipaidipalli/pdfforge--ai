@@ -31,17 +31,32 @@ export class LoginDto {
 }
 
 export class RefreshTokenDto {
-  @ApiProperty({ description: 'Secure refresh token' })
+  @ApiProperty({ description: 'Secure refresh token', required: false })
   @IsString()
-  @IsNotEmpty()
-  refreshToken: string;
+  @IsOptional()
+  refreshToken?: string;
 }
 
 export class GoogleAuthDto {
-  @ApiProperty({ description: 'Google OAuth id_token or authorization code' })
+  @ApiProperty({ description: 'Google OAuth id_token or credential token', required: false })
   @IsString()
-  @IsNotEmpty()
-  idToken: string;
+  @IsOptional()
+  idToken?: string;
+
+  @ApiProperty({ description: 'Google Identity Services credential', required: false })
+  @IsString()
+  @IsOptional()
+  credential?: string;
+
+  @ApiProperty({ description: 'Google OAuth 2.0 authorization code', required: false })
+  @IsString()
+  @IsOptional()
+  code?: string;
+
+  @ApiProperty({ description: 'Redirect URI used during authorization code flow', required: false })
+  @IsString()
+  @IsOptional()
+  redirectUri?: string;
 }
 
 export class GithubAuthDto {

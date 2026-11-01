@@ -85,6 +85,10 @@ services:
       WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:-pdfforge-worker-internal-secret}
       JWT_SECRET: ${JWT_SECRET:-pdfforge-enterprise-jwt-super-secret-key-2026}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-pdfforge-enterprise-refresh-secret-key-2026}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:4000/api/v1/auth/google/callback}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     ports:
       - "4000:4000"
     depends_on:
@@ -146,6 +150,7 @@ services:
     restart: always
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     ports:
       - "3000:3000"
     depends_on:
