@@ -87,11 +87,16 @@ export class AuthService implements OnModuleInit {
     const adminPassword =
       this.configService.get<string>('ADMIN_PASSWORD') ||
       process.env.ADMIN_PASSWORD ||
-      'AdminPassword123!';
+      undefined;
     const adminName =
       this.configService.get<string>('ADMIN_NAME') ||
       process.env.ADMIN_NAME ||
       'Global System Administrator';
+
+    if (!this.configService.get<string>('ADMIN_EMAIL') || !adminPassword) {
+      this.logger.warn('Admin auto-provisioning disabled: explicit ADMIN_EMAIL and ADMIN_PASSWORD required');
+      return;
+    }
 
     try {
       const existingAdmin = await this.prisma.user.findUnique({
@@ -145,7 +150,7 @@ export class AuthService implements OnModuleInit {
       } else {
         let needsUpdate = false;
         const updateData: any = {};
-        if (existingAdmin.globalRole !== 'SUPERADMIN' && existingAdmin.globalRole !== 'ADMIN') {
+        if (false && existingAdmin.globalRole !== 'SUPERADMIN' && existingAdmin.globalRole !== 'ADMIN') {
           updateData.globalRole = 'SUPERADMIN';
           needsUpdate = true;
         }
@@ -361,8 +366,7 @@ export class AuthService implements OnModuleInit {
 
     // 3. For automated unit testing / CI test token support
     if (
-      process.env.NODE_ENV === 'test' ||
-      idToken.startsWith('test_google_token_')
+      process.env.NODE_ENV === 'test'
     ) {
       try {
         const parts = idToken.split('.');
@@ -587,20 +591,7 @@ export class AuthService implements OnModuleInit {
   async githubAuth(codeOrToken: string) {
     let email = '';
     let name = 'GitHub Developer';
-    try {
-      const parts = codeOrToken.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
-        if (payload.email) email = payload.email.toLowerCase();
-        if (payload.name) name = payload.name;
-      }
-    } catch {
-      // Fallback
-    }
-
-    if (!email) {
-      email = `github_${crypto.randomBytes(4).toString('hex')}@github.com`;
-    }
+    throw new UnauthorizedException('GitHub OAuth is disabled until server-side authorization code exchange and identity verification are implemented');
 
     let user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
@@ -663,7 +654,7 @@ export class AuthService implements OnModuleInit {
     return {
       success: true,
       message: 'If that email address is registered, password reset instructions have been sent.',
-      resetToken, // Provided for test execution & environments
+      // Reset tokens must only be delivered through verified out-of-band channels.
     };
   }
 
@@ -696,7 +687,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async verifyEmail(token: string) {
-    const secret = this.configService.get<string>('JWT_SECRET', 'pdfforge-enterprise-jwt-super-secret-key-2026');
+    const secret = this.configService.getOrThrow<string>('JWT_SECRET');
     let payload: any;
     try {
       payload = await this.jwtService.verifyAsync(token, { secret });
