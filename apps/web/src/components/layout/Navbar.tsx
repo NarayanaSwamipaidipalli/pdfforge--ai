@@ -5,61 +5,68 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
 import {
-  Sparkles,
+  FileCheck2,
   ChevronDown,
   LayoutDashboard,
   User,
   CreditCard,
-  Key,
   Settings,
   LogOut,
+  Bell,
   Menu,
   X,
-  FileCheck2,
-  Shield,
+  CheckCircle2,
+  AlertCircle,
   ExternalLink,
 } from 'lucide-react';
 
 export const Navbar = () => {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isAuthenticated, isHydrated, logout, syncProfile } = useAuthStore();
+  const { user, isAuthenticated, logout, syncProfile } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(2);
+
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMounted(true);
     syncProfile();
   }, []);
 
-  // Close dropdown on click outside
+  // Close dropdowns on outside click or Escape
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setUserDropdownOpen(false);
       }
+      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
+        setNotificationsOpen(false);
+      }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setUserDropdownOpen(false);
+        setNotificationsOpen(false);
       }
     };
 
-    if (userDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('keydown', handleKeyDown);
-    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [userDropdownOpen]);
+  }, []);
 
   // Close menus on route change
   useEffect(() => {
     setUserDropdownOpen(false);
+    setNotificationsOpen(false);
     setMobileMenuOpen(false);
   }, [pathname]);
 
@@ -70,16 +77,23 @@ export const Navbar = () => {
     router.push('/');
   };
 
-  const navLinks = [
+  const isUserLoggedIn = mounted && isAuthenticated && user;
+
+  // Header navigation items strictly per specification
+  const unauthNavLinks = [
+    { label: 'Home', href: '/' },
     { label: 'Tools', href: '/#tools' },
-    { label: 'Features', href: '/features' },
-    { label: 'AI Studio', href: '/ai-studio', badge: 'GPT-4o' },
     { label: 'Pricing', href: '/pricing' },
-    { label: 'Developers', href: '/developers' },
-    ...(mounted && (user?.role === 'ADMIN' || user?.role === 'SUPERADMIN')
-      ? [{ label: 'Admin', href: '/admin' }]
-      : []),
   ];
+
+  const authNavLinks = [
+    { label: 'Home', href: '/' },
+    { label: 'Tools', href: '/#tools' },
+    { label: 'Dashboard', href: '/dashboard' },
+    { label: 'Billing', href: '/billing' },
+  ];
+
+  const currentNavLinks = isUserLoggedIn ? authNavLinks : unauthNavLinks;
 
   const getPlanBadgeClass = (plan?: string) => {
     switch (plan) {
@@ -94,13 +108,11 @@ export const Navbar = () => {
     }
   };
 
-  const isUserLoggedIn = mounted && isAuthenticated && user;
-
   return (
     <header className="sticky top-0 z-50 w-full border-b border-black/[0.06] dark:border-white/[0.08] bg-white/80 dark:bg-black/80 backdrop-blur-xl transition-all">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group">
+        <Link href="/" className="flex items-center gap-2.5 group shrink-0">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform duration-200">
             <FileCheck2 className="w-5 h-5" />
           </div>
@@ -113,11 +125,11 @@ export const Navbar = () => {
 
         {/* Desktop Navigation Links */}
         <nav className="hidden md:flex items-center gap-1">
-          {navLinks.map((link) => {
+          {currentNavLinks.map((link) => {
             const isActive = pathname === link.href;
             return (
               <Link
-                key={link.href}
+                key={link.label}
                 href={link.href}
                 className={`px-3.5 py-1.5 text-sm font-medium rounded-full transition-all duration-150 flex items-center gap-1.5 ${
                   isActive
@@ -126,19 +138,83 @@ export const Navbar = () => {
                 }`}
               >
                 {link.label}
-                {link.badge && (
-                  <span className="text-[10px] uppercase font-semibold px-1.5 py-0.2 rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 text-white leading-none">
-                    {link.badge}
-                  </span>
-                )}
               </Link>
             );
           })}
+
+          {/* When logged in: Notifications link in nav */}
+          {isUserLoggedIn && (
+            <div className="relative" ref={notifRef}>
+              <button
+                type="button"
+                onClick={() => setNotificationsOpen(!notificationsOpen)}
+                className={`px-3.5 py-1.5 text-sm font-medium rounded-full transition-all duration-150 flex items-center gap-1.5 ${
+                  notificationsOpen
+                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/60'
+                }`}
+              >
+                <Bell className="w-4 h-4" />
+                <span>Notifications</span>
+                {unreadCount > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                )}
+              </button>
+
+              {/* Notifications Popover */}
+              {notificationsOpen && (
+                <div className="absolute left-0 mt-2 w-80 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl py-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="px-4 pb-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                      Notifications
+                    </span>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={() => setUnreadCount(0)}
+                        className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Mark all as read
+                      </button>
+                    )}
+                  </div>
+                  <div className="divide-y divide-zinc-100 dark:divide-zinc-800 text-xs">
+                    <div className="p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition">
+                      <div className="flex items-center gap-1.5 font-medium text-zinc-900 dark:text-white">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Account Initialized</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        Your enterprise document intelligence workspace is ready.
+                      </p>
+                    </div>
+                    <div className="p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition">
+                      <div className="flex items-center gap-1.5 font-medium text-zinc-900 dark:text-white">
+                        <FileCheck2 className="w-3.5 h-3.5 text-blue-600" />
+                        <span>24+ PDF Tools Online</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        OCR, Compression, and AI Conversion pipelines active.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="px-4 pt-2 border-t border-zinc-100 dark:border-zinc-800 text-center">
+                    <Link
+                      href="/settings"
+                      className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                    >
+                      Notification Preferences in Settings
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </nav>
 
-        {/* Desktop Session / Auth Controls */}
+        {/* Desktop Header Actions */}
         <div className="hidden md:flex items-center gap-3">
           {isUserLoggedIn ? (
+            /* Logged in: User Avatar & Dropdown */
             <div className="relative" ref={dropdownRef}>
               <button
                 type="button"
@@ -146,6 +222,7 @@ export const Navbar = () => {
                 className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 aria-expanded={userDropdownOpen}
                 aria-haspopup="true"
+                aria-label="User account menu"
               >
                 {/* User Avatar */}
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white text-xs flex items-center justify-center font-bold overflow-hidden shadow-inner shrink-0">
@@ -166,9 +243,15 @@ export const Navbar = () => {
                 <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 ${userDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
 
-              {/* User Dropdown Menu */}
+              {/* User Avatar Dropdown strictly per specification:
+                  - My Account
+                  - Dashboard
+                  - Billing
+                  - Settings
+                  - Logout
+              */}
               {userDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                   {/* Account Header */}
                   <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800/80">
                     <p className="text-xs font-semibold text-zinc-900 dark:text-white truncate">
@@ -181,15 +264,10 @@ export const Navbar = () => {
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getPlanBadgeClass(user.plan)}`}>
                         {user.plan || 'FREE'} PLAN
                       </span>
-                      {user.role === 'ADMIN' || user.role === 'SUPERADMIN' ? (
-                        <span className="text-[10px] font-semibold text-rose-600 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-900">
-                          {user.role}
-                        </span>
-                      ) : null}
                     </div>
                   </div>
 
-                  {/* Navigation Links */}
+                  {/* Menu Items */}
                   <div className="py-1 text-xs text-zinc-700 dark:text-zinc-300">
                     <Link
                       href="/account"
@@ -212,15 +290,7 @@ export const Navbar = () => {
                       className="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
                     >
                       <CreditCard className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      <span>Billing & Subscriptions</span>
-                    </Link>
-
-                    <Link
-                      href="/dashboard#keys"
-                      className="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
-                    >
-                      <Key className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                      <span>API Keys</span>
+                      <span>Billing</span>
                     </Link>
 
                     <Link
@@ -228,11 +298,11 @@ export const Navbar = () => {
                       className="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
                     >
                       <Settings className="w-4 h-4 text-zinc-600 dark:text-zinc-400" />
-                      <span>Settings & Security</span>
+                      <span>Settings</span>
                     </Link>
                   </div>
 
-                  {/* Logout Action */}
+                  {/* Logout Button */}
                   <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800/80">
                     <button
                       type="button"
@@ -240,27 +310,28 @@ export const Navbar = () => {
                       className="w-full text-left flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
                     >
                       <LogOut className="w-4 h-4" />
-                      <span>Sign Out</span>
+                      <span>Logout</span>
                     </button>
                   </div>
                 </div>
               )}
             </div>
           ) : (
-            <>
+            /* When NOT logged in: Login and Sign Up permanently visible */
+            <div className="flex items-center gap-3">
               <Link
                 href="/login"
-                className="text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white px-3 py-1.5 transition-colors"
+                className="text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white px-3.5 py-1.5 rounded-full transition-colors"
               >
-                Sign In
+                Login
               </Link>
               <Link
-                href="/register"
-                className="text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 px-4 py-2 rounded-full shadow-sm transition-all hover:shadow"
+                href="/signup"
+                className="text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-full shadow-sm transition-all hover:shadow"
               >
-                Get Started Free
+                Sign Up
               </Link>
-            </>
+            </div>
           )}
         </div>
 
@@ -277,7 +348,7 @@ export const Navbar = () => {
         </div>
       </div>
 
-      {/* Mobile Drawer */}
+      {/* Mobile Menu Drawer */}
       {mobileMenuOpen && (
         <div className="md:hidden border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black px-4 pt-2 pb-6 space-y-3">
           {isUserLoggedIn && (
@@ -303,10 +374,11 @@ export const Navbar = () => {
             </div>
           )}
 
+          {/* Nav links */}
           <div className="space-y-1">
-            {navLinks.map((link) => (
+            {currentNavLinks.map((link) => (
               <Link
-                key={link.href}
+                key={link.label}
                 href={link.href}
                 onClick={() => setMobileMenuOpen(false)}
                 className="block px-3 py-2 text-base font-medium text-zinc-800 dark:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -351,7 +423,7 @@ export const Navbar = () => {
                 onClick={handleLogout}
                 className="w-full text-left flex items-center gap-2 px-3 py-2 text-rose-600 dark:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
               >
-                <LogOut className="w-4 h-4" /> Sign Out
+                <LogOut className="w-4 h-4" /> Logout
               </button>
             </div>
           ) : (
@@ -361,14 +433,14 @@ export const Navbar = () => {
                 onClick={() => setMobileMenuOpen(false)}
                 className="w-full text-center py-2 px-4 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 font-medium text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
               >
-                Sign In
+                Login
               </Link>
               <Link
-                href="/register"
+                href="/signup"
                 onClick={() => setMobileMenuOpen(false)}
                 className="w-full text-center py-2 px-4 rounded-xl bg-blue-600 text-white font-medium text-sm hover:bg-blue-700"
               >
-                Get Started Free
+                Sign Up
               </Link>
             </div>
           )}

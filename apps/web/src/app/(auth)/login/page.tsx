@@ -211,12 +211,12 @@ function LoginForm() {
           Sign in to your account
         </h1>
         <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-          Or{' '}
+          Don&apos;t have an account?{' '}
           <Link
-            href="/register"
-            className="text-blue-600 dark:text-blue-400 font-medium hover:underline"
+            href="/signup"
+            className="text-blue-600 dark:text-blue-400 font-semibold hover:underline"
           >
-            create a new account for free
+            Create Account
           </Link>
         </p>
       </div>
@@ -299,9 +299,9 @@ function LoginForm() {
                 </label>
                 <Link
                   href="/forgot-password"
-                  className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+                  className="text-[11px] text-blue-600 dark:text-blue-400 font-medium hover:underline"
                 >
-                  Forgot password?
+                  Forgot Password?
                 </Link>
               </div>
               <div className="relative">
@@ -342,6 +342,17 @@ function LoginForm() {
               )}
             </button>
           </form>
+
+          {/* Create Account Link Footer */}
+          <div className="pt-2 text-center text-xs text-zinc-500 dark:text-zinc-400 border-t border-zinc-100 dark:border-zinc-800">
+            <span>New to PDFForge AI? </span>
+            <Link
+              href="/signup"
+              className="font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Create Account
+            </Link>
+          </div>
 
           {/* Security Assurance Badge */}
           <div className="pt-2 text-center text-[10px] text-zinc-400 flex items-center justify-center gap-1.5">

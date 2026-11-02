@@ -203,8 +203,8 @@ function RegisterForm() {
         </h1>
         <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
           Already have an account?{' '}
-          <Link href="/login" className="text-blue-600 dark:text-blue-400 font-medium hover:underline">
-            Sign in
+          <Link href="/login" className="text-blue-600 dark:text-blue-400 font-semibold hover:underline">
+            Login
           </Link>
         </p>
       </div>
@@ -247,7 +247,7 @@ function RegisterForm() {
                 />
               </svg>
             )}
-            <span>{googleLoading ? 'Connecting to Google...' : 'Sign up with Google'}</span>
+            <span>{googleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
           </button>
 
           <div className="relative">
