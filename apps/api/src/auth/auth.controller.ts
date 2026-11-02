@@ -138,7 +138,7 @@ export class AuthController {
       });
 
       return res.redirect(
-        `${frontendUrl}/auth/callback?token=${result.tokens.accessToken}&refreshToken=${result.tokens.refreshToken}&userId=${result.user.id}&plan=${result.user.plan}&role=${result.user.role}`,
+        `${frontendUrl}/login?error=oauth_callback_exchange_required`,
       );
     } catch (err: any) {
       return res.redirect(
