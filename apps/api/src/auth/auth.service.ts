@@ -719,20 +719,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async verify2Fa(userId: string, code: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.twoFactorSecret) {
-      throw new BadRequestException('2FA setup not initiated');
-    }
-
-    if (code.length === 6 && /^\d+$/.test(code)) {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { twoFactorEnabled: true },
-      });
-      return { success: true, message: 'Two-Factor Authentication successfully enabled.' };
-    }
-
-    throw new BadRequestException('Invalid 2FA verification code');
+    throw new BadRequestException('Two-factor authentication enrollment is unavailable until real TOTP verification is implemented');
   }
 
   async createApiKey(userId: string, dto: CreateApiKeyDto) {
