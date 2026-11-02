@@ -82,14 +82,7 @@ export class BillingService {
 
   verifyStripeWebhook(rawBody?: Buffer, signature?: string): Stripe.Event {
     const secret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET');
-    if (!secret || secret.startsWith('whsec_test') || !this.stripe) {
-      if (!rawBody) throw new UnauthorizedException('Missing webhook payload');
-      try {
-        return JSON.parse(rawBody.toString('utf8'));
-      } catch {
-        throw new UnauthorizedException('Invalid JSON webhook body');
-      }
-    }
+    if (!secret || !this.stripe) throw new UnauthorizedException('Stripe webhook verification is not configured');
     if (!rawBody || !signature) {
       throw new UnauthorizedException('Invalid Stripe webhook request or unconfigured secret');
     }
@@ -103,9 +96,7 @@ export class BillingService {
 
   verifyRazorpayWebhook(rawBody?: Buffer, signature?: string): void {
     const secret = this.configService.get<string>('RAZORPAY_WEBHOOK_SECRET');
-    if (!secret || secret.startsWith('rzp_test')) {
-      return; // Skip signature check in dev/test when secret is not configured
-    }
+    if (!secret) throw new UnauthorizedException('Razorpay webhook verification is not configured');
     if (!rawBody || !signature) {
       throw new UnauthorizedException('Invalid Razorpay webhook request or unconfigured secret');
     }
@@ -122,9 +113,7 @@ export class BillingService {
 
   async verifyPayPalWebhook(rawBody?: Buffer, headers: Record<string, string> = {}): Promise<void> {
     const webhookId = this.configService.get<string>('PAYPAL_WEBHOOK_ID');
-    if (!webhookId || webhookId.startsWith('mock_')) {
-      return; // Skip verification in dev/test
-    }
+    if (!webhookId) throw new UnauthorizedException('PayPal webhook verification is not configured');
     if (!rawBody) {
       throw new UnauthorizedException('Invalid PayPal webhook request');
     }
@@ -401,6 +390,7 @@ export class BillingService {
 
     // 1. RAZORPAY CHECKOUT
     if (provider === BillingProvider.RAZORPAY) {
+      throw new BadRequestException('Razorpay checkout unavailable until verified provider integration is implemented');
       const orderId = `order_rzp_${crypto.randomBytes(8).toString('hex')}`;
       const amountPaise = Math.round(baseAmount * 100 * 83); // USD to INR conversion approximate
       const keyId = this.configService.get<string>('RAZORPAY_KEY_ID', 'rzp_test_mock_enterprise');
@@ -420,6 +410,7 @@ export class BillingService {
 
     // 2. PAYPAL CHECKOUT
     if (provider === BillingProvider.PAYPAL) {
+      throw new BadRequestException('PayPal checkout unavailable until verified provider integration is implemented');
       const orderId = `PAYPAL-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       return {
         provider: 'paypal',
@@ -658,6 +649,7 @@ export class BillingService {
   // ============================================================================
 
   async verifyRazorpayPayment(userId: string, dto: VerifyPaymentDto) {
+    throw new BadRequestException('Razorpay verification unavailable until provider payment confirmation is implemented');
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
@@ -702,6 +694,7 @@ export class BillingService {
   // ============================================================================
 
   async capturePayPalOrder(userId: string, dto: CapturePayPalOrderDto) {
+    throw new BadRequestException('PayPal capture unavailable until provider payment confirmation is implemented');
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
