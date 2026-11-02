@@ -12,6 +12,8 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/roles.decorator';
 
 @ApiTags('AI Document Intelligence')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 @Controller('api/v1/ai')
 export class AiController {
   constructor(private readonly aiService: AiService) {}
