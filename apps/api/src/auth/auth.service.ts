@@ -148,24 +148,7 @@ export class AuthService implements OnModuleInit {
 
         this.logger.log(`Provisioned default enterprise admin account: ${adminEmail} (SUPERADMIN)`);
       } else {
-        let needsUpdate = false;
-        const updateData: any = {};
-        // Existing users must never be promoted automatically during startup.
-        if (existingAdmin.isBanned) {
-          updateData.isBanned = false;
-          needsUpdate = true;
-        }
-        if (!existingAdmin.isEmailVerified) {
-          updateData.isEmailVerified = true;
-          needsUpdate = true;
-        }
-        if (needsUpdate) {
-          await this.prisma.user.update({
-            where: { id: existingAdmin.id },
-            data: updateData,
-          });
-          this.logger.log(`Upgraded default enterprise admin account: ${adminEmail}`);
-        }
+        this.logger.warn('Admin provisioning skipped: configured email already belongs to an existing user');
       }
     } catch (err: any) {
       this.logger.warn(`Deferred admin account check: ${err?.message || err}`);
@@ -629,30 +612,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async forgotPassword(email: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
-
-    if (!user) {
-      return { success: true, message: 'If that email address is registered, password reset instructions have been sent.' };
-    }
-
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetExpires = new Date(Date.now() + 3600000); // 1 hour
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordResetToken: resetToken,
-        passwordResetExpiresAt: resetExpires,
-      },
-    });
-
-    return {
-      success: true,
-      message: 'If that email address is registered, password reset instructions have been sent.',
-      // Reset tokens must only be delivered through verified out-of-band channels.
-    };
+    throw new BadRequestException('Password recovery is temporarily unavailable until verified email delivery is configured');
   }
 
   async resetPassword(token: string, newPassword: string) {
