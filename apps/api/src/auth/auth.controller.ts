@@ -124,27 +124,7 @@ export class AuthController {
       return res.redirect(`${frontendUrl}/login?error=missing_authorization_code`);
     }
 
-    try {
-      const ip = (req.headers['x-forwarded-for'] as string) || req.ip || '127.0.0.1';
-      const userAgent = (req.headers['user-agent'] as string) || 'Web Browser';
-      const result = await this.authService.googleAuth({ code }, ip, userAgent);
-
-      res.cookie('pdfforge_refresh_token', result.tokens.refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        path: '/',
-      });
-
-      return res.redirect(
-        `${frontendUrl}/login?error=oauth_callback_exchange_required`,
-      );
-    } catch (err: any) {
-      return res.redirect(
-        `${frontendUrl}/login?error=${encodeURIComponent(err.message || 'Google authentication failed')}`,
-      );
-    }
+    return res.redirect(`${frontendUrl}/login?error=oauth_callback_exchange_required`);
   }
 
   @Post('google')
