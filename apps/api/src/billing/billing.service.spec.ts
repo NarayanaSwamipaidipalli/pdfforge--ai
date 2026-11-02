@@ -190,70 +190,30 @@ describe('BillingService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    it('should initialize Razorpay order payload correctly', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'test@example.com', name: 'Test' });
-      prisma.subscription.findFirst.mockResolvedValue(null);
-
-      const session: any = await service.createCheckoutSession('user_1', {
-        tier: SubscriptionTier.PRO,
-        provider: BillingProvider.RAZORPAY,
-        interval: 'monthly',
-      });
-
-      expect(session.provider).toBe('razorpay');
-      expect(session.orderId).toBeDefined();
-      expect(session.amount).toBe(Math.round(12 * 100 * 83));
-      expect(session.currency).toBe('INR');
-    });
-
-    it('should initialize PayPal order payload correctly', async () => {
+    it('rejects unverified Razorpay checkout', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'test@example.com' });
       prisma.subscription.findFirst.mockResolvedValue(null);
+      await expect(service.createCheckoutSession('user_1', { tier: SubscriptionTier.PRO, provider: BillingProvider.RAZORPAY })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
 
-      const session: any = await service.createCheckoutSession('user_1', {
-        tier: SubscriptionTier.BUSINESS,
-        provider: BillingProvider.PAYPAL,
-        interval: 'yearly',
-      });
-
-      expect(session.provider).toBe('paypal');
-      expect(session.orderId).toBeDefined();
-      expect(session.amount).toBe(490);
-      expect(session.approvalUrl).toContain('status=approved');
+    it('rejects unverified PayPal checkout', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'test@example.com' });
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      await expect(service.createCheckoutSession('user_1', { tier: SubscriptionTier.PRO, provider: BillingProvider.PAYPAL })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 
   describe('Payment Verification & Activation', () => {
-    it('should atomically verify Razorpay payment and upgrade subscription', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', plan: 'FREE' });
-
-      const result = await service.verifyRazorpayPayment('user_1', {
-        orderId: 'order_123',
-        paymentId: 'pay_123',
-        signature: 'mock_sig',
-        tier: SubscriptionTier.PRO,
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.plan).toBe('PRO');
-      expect(prisma.$transaction).toHaveBeenCalled();
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'user_1' },
-        data: { plan: 'PRO' },
-      });
+    it('rejects unverified Razorpay payment without upgrading a user', async () => {
+      await expect(service.verifyRazorpayPayment('user_1', { orderId: 'order_123', paymentId: 'pay_123', signature: 'invalid', tier: SubscriptionTier.PRO })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('should atomically capture PayPal order and upgrade subscription', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', plan: 'FREE' });
-
-      const result = await service.capturePayPalOrder('user_1', {
-        orderId: 'PAYPAL-1234',
-        tier: SubscriptionTier.BUSINESS,
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.plan).toBe('BUSINESS');
-      expect(prisma.$transaction).toHaveBeenCalled();
+    it('rejects unverified PayPal capture without upgrading a user', async () => {
+      await expect(service.capturePayPalOrder('user_1', { orderId: 'PAYPAL-1234', tier: SubscriptionTier.BUSINESS })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 
