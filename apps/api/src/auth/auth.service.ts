@@ -150,13 +150,7 @@ export class AuthService implements OnModuleInit {
       } else {
         let needsUpdate = false;
         const updateData: any = {};
-        if (existingAdmin.globalRole !== 'SUPERADMIN' && existingAdmin.globalRole !== 'ADMIN') {
-          this.logger.warn('Existing admin role will not be elevated automatically');
-        }
-        if (false) {
-          updateData.globalRole = 'SUPERADMIN';
-          needsUpdate = true;
-        }
+        // Existing users must never be promoted automatically during startup.
         if (existingAdmin.isBanned) {
           updateData.isBanned = false;
           needsUpdate = true;
