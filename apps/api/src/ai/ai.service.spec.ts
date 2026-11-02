@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AiService } from './ai.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { OllamaProvider } from './providers/ollama.provider';
 
 describe('AiService', () => {
@@ -12,10 +12,10 @@ describe('AiService', () => {
   beforeEach(async () => {
     prismaService = {
       fileRecord: {
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
       },
       aiConversation: {
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
       },
       aiMessage: {
@@ -55,32 +55,37 @@ describe('AiService', () => {
   });
 
   it('should throw NotFoundException if document does not exist', async () => {
-    prismaService.fileRecord.findUnique.mockResolvedValue(null);
+    prismaService.fileRecord.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.summarizeDocument({ fileId: 'unknown_file_id' }),
+      service.summarizeDocument({ fileId: 'unknown_file_id' }, 'user_1'),
     ).rejects.toThrow(NotFoundException);
   });
 
+  it('should reject missing user identity', async () => {
+    await expect(service.summarizeDocument({ fileId: 'doc_1' })).rejects.toThrow(BadRequestException);
+    expect(prismaService.fileRecord.findFirst).not.toHaveBeenCalled();
+  });
+
   it('should return simulated structured summary when OpenAI API is in dev mode', async () => {
-    prismaService.fileRecord.findUnique.mockResolvedValue({
+    prismaService.fileRecord.findFirst.mockResolvedValue({
       id: 'doc_1',
       originalName: 'Financial_Report.pdf',
     });
 
-    const result = await service.summarizeDocument({ fileId: 'doc_1' });
+    const result = await service.summarizeDocument({ fileId: 'doc_1' }, 'user_1');
     expect(result).toBeDefined();
     expect(result.fileId).toBe('doc_1');
     expect(result.summary).toContain('Executive Summary');
   });
 
   it('should extract structured invoice data', async () => {
-    prismaService.fileRecord.findUnique.mockResolvedValue({
+    prismaService.fileRecord.findFirst.mockResolvedValue({
       id: 'inv_1',
       originalName: 'Vendor_Invoice.pdf',
     });
 
-    const result = await service.extractInvoice('inv_1');
+    const result = await service.extractInvoice('inv_1', undefined, undefined, 'user_1');
     expect(result).toBeDefined();
     expect(result.documentType).toBe('INVOICE');
     expect(result.extractedData.totalAmount).toBeGreaterThan(0);
