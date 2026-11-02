@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -201,7 +201,7 @@ export class AiService {
     const file = await this.getOrMockFile(dto.fileId, userId);
 
     let conversation = dto.conversationId
-      ? await this.prisma.aiConversation.findUnique({ where: { id: dto.conversationId } })
+      ? await this.prisma.aiConversation.findFirst({ where: { id: dto.conversationId, userId, fileId: file.id } })
       : null;
 
     if (!conversation && userId) {
