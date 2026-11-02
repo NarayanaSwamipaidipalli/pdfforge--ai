@@ -204,6 +204,8 @@ export class AiService {
       ? await this.prisma.aiConversation.findFirst({ where: { id: dto.conversationId, userId, fileId: file.id } })
       : null;
 
+    if (dto.conversationId && !conversation) throw new NotFoundException('Conversation not found');
+
     if (!conversation && userId) {
       conversation = await this.prisma.aiConversation.create({
         data: {
