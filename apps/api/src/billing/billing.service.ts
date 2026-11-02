@@ -653,13 +653,13 @@ export class BillingService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const keySecret = this.configService.get<string>('RAZORPAY_KEY_SECRET', 'mock_rzp_secret');
+    const keySecret = this.configService.getOrThrow<string>('RAZORPAY_KEY_SECRET');
     const expectedSignature = crypto
       .createHmac('sha256', keySecret)
       .update(`${dto.orderId}|${dto.paymentId}`)
       .digest('hex');
 
-    const isValid = dto.signature === expectedSignature || keySecret === 'mock_rzp_secret';
+    const isValid = dto.signature === expectedSignature;
     if (!isValid) {
       throw new BadRequestException('Invalid Razorpay cryptographic payment signature');
     }
