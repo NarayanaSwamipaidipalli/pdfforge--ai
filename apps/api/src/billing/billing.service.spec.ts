@@ -250,7 +250,7 @@ describe('BillingService', () => {
       const createOrder = jest.spyOn(axios, 'post').mockResolvedValueOnce({
         data: { id: 'order_verified', amount: 99000, currency: 'INR' },
       } as any);
-      const session = await service.createCheckoutSession('user_1', {
+      const session: any = await service.createCheckoutSession('user_1', {
         tier: SubscriptionTier.PRO, interval: 'monthly', provider: BillingProvider.RAZORPAY,
       });
       expect(createOrder).toHaveBeenCalledWith(
