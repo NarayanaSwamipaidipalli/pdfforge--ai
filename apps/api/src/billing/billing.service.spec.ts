@@ -266,6 +266,45 @@ describe('BillingService', () => {
       expect(session).not.toHaveProperty('keySecret');
     });
 
+    it('activates access only after Razorpay confirms the captured payment', async () => {
+      configureRazorpay();
+      prisma.razorpayCheckout.findUnique.mockResolvedValue({
+        id: 'checkout_1', orderId: 'order_verified', userId: 'user_1',
+        tier: 'PRO', interval: 'monthly', amountPaise: 99000, currency: 'INR', status: 'PENDING',
+      });
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      jest.spyOn(axios, 'get').mockResolvedValueOnce({
+        data: { id: 'pay_verified', order_id: 'order_verified', status: 'captured', captured: true, amount: 99000, currency: 'INR' },
+      } as any);
+      const signature = crypto.createHmac('sha256', keySecret).update('order_verified|pay_verified').digest('hex');
+      const result = await service.verifyRazorpayPayment('user_1', {
+        orderId: 'order_verified', paymentId: 'pay_verified', signature,
+      });
+      expect(result.success).toBe(true);
+      expect(prisma.razorpayCheckout.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'checkout_1', status: 'PENDING' } }),
+      );
+      expect(prisma.payment.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: { providerPaymentId: 'pay_verified' },
+        create: expect.objectContaining({ userId: 'user_1', amount: 990, currency: 'INR', provider: 'razorpay' }),
+      }));
+    });
+
+    it('does not activate a payment twice for duplicate callbacks', async () => {
+      configureRazorpay();
+      prisma.razorpayCheckout.findUnique.mockResolvedValue({
+        id: 'checkout_1', orderId: 'order_verified', userId: 'user_1',
+        tier: 'PRO', interval: 'monthly', amountPaise: 99000,
+        currency: 'INR', status: 'PAID', paymentId: 'pay_verified',
+      });
+      const signature = crypto.createHmac('sha256', keySecret).update('order_verified|pay_verified').digest('hex');
+      const result = await service.verifyRazorpayPayment('user_1', {
+        orderId: 'order_verified', paymentId: 'pay_verified', signature,
+      });
+      expect(result.success).toBe(true);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
     it('rejects captured payments with a mismatched amount', async () => {
       configureRazorpay();
       prisma.razorpayCheckout.findUnique.mockResolvedValue({
