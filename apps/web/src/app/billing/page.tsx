@@ -1,5 +1,6 @@
-import { openRazorpayCheckout } from '@/lib/razorpay-checkout';
 'use client';
+
+import { openRazorpayCheckout } from '@/lib/razorpay-checkout';
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
