@@ -7,7 +7,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   constructor() {
     super({
-      log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+      // Prisma errors can include connection details or user SQL parameters.
+      log: [],
     });
   }
 
@@ -16,7 +17,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       await this.$connect();
       this.logger.log('Successfully connected to PostgreSQL via Prisma');
     } catch (err) {
-      this.logger.warn(`Database connection deferred or pending initialization: ${(err as Error).message}`);
+      this.logger.error('Database connection failed');
+      throw new Error('Database is unavailable');
     }
   }
 

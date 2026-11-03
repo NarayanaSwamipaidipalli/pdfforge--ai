@@ -209,98 +209,82 @@ def html_to_pdf(input_path: str, output_path: str) -> str:
         return output_path
 
 def office_to_pdf(input_path: str, output_dir: str) -> str:
-    """
-    Converts DOCX, XLSX, PPTX, or text files to a real PDF.
-    Uses LibreOffice if available, or native python-docx / openpyxl / ReportLab renderer.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    base_name = os.path.splitext(os.path.basename(input_path))[0]
-    output_pdf = os.path.join(output_dir, f"{base_name}.pdf")
-    ext = os.path.splitext(input_path)[1].lower()
-    
-    # 1. Try LibreOffice headless
-    cmd = ["libreoffice", "--headless", "--convert-to", "pdf", input_path, "--outdir", output_dir]
-    try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-        generated = os.path.join(output_dir, f"{base_name}.pdf")
-        if os.path.exists(generated) and os.path.getsize(generated) > 500:
-            return generated
-    except Exception:
-        pass
-        
-    # 2. Native high-fidelity fallback using python-docx / reportlab
-    from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib import colors
-    
-    doc = SimpleDocTemplate(output_pdf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
-    styles = getSampleStyleSheet()
-    story = []
-    
-    if ext in [".docx", ".doc"]:
+    """Convert with the installed LibreOffice engine; never return a lossy placeholder."""
+    import shutil
+    import signal
+    import tempfile
+    from pathlib import Path
+    from app.config import settings
+
+    source = Path(input_path).resolve(strict=True)
+    allowed = {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".rtf", ".txt", ".csv"}
+    if not source.is_file() or source.suffix.lower() not in allowed:
+        raise ValueError("Unsupported office document type")
+    executable = shutil.which("libreoffice")
+    if not executable:
+        raise RuntimeError("LibreOffice is required for office-to-PDF conversion")
+    target_dir = Path(output_dir).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    destination = target_dir / f"{source.stem}.pdf"
+
+    # Each invocation gets a fresh profile and staging directory. A stale output or
+    # another concurrent LibreOffice process cannot be mistaken for success.
+    with tempfile.TemporaryDirectory(prefix="pdfforge-office-", dir=target_dir) as temporary:
+        staging = Path(temporary)
+        profile = staging / "profile"
+        user_profile = profile / "user"
+        user_profile.mkdir(parents=True)
+        (user_profile / "registrymodifications.xcu").write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<oor:items xmlns:oor="http://openoffice.org/2001/registry">'
+            '<item oor:path="/org.openoffice.Office.Common/Security/Scripting">'
+            '<prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop>'
+            '<prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop>'
+            '<prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item>'
+            '</oor:items>', encoding="utf-8",
+        )
+        converted = staging / "converted"
+        converted.mkdir()
+        scratch = staging / "tmp"
+        scratch.mkdir()
+        command = [
+            executable, f"-env:UserInstallation={profile.as_uri()}",
+            "--headless", "--nologo", "--nodefault", "--norestore",
+            "--convert-to", "pdf", "--outdir", str(converted), str(source),
+        ]
         try:
-            from docx import Document
-            docx_doc = Document(input_path)
-            for p in docx_doc.paragraphs:
-                text = p.text.strip()
-                if text:
-                    if p.style.name.startswith("Heading"):
-                        story.append(Paragraph(f"<b>{text}</b>", styles['Heading2']))
-                    else:
-                        story.append(Paragraph(text, styles['Normal']))
-                    story.append(Spacer(1, 6))
-            for tbl in docx_doc.tables:
-                t_data = [[cell.text.strip() for cell in row.cells] for row in tbl.rows]
-                if t_data:
-                    table = Table(t_data)
-                    table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f4f8')),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                        ('FONTSIZE', (0, 0), (-1, -1), 8),
-                    ]))
-                    story.append(table)
-                    story.append(Spacer(1, 10))
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=os.name != "nt",
+                # The document converter does not need API, storage or queue secrets.
+                env={
+                    "PATH": os.environ.get("PATH", os.defpath), "HOME": str(profile),
+                    "TMPDIR": str(scratch), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+                    "SAL_USE_VCLPLUGIN": "svp",
+                },
+            )
+        except OSError:
+            raise RuntimeError("LibreOffice could not be started") from None
+        try:
+            process.communicate(timeout=settings.OFFICE_CONVERSION_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            if os.name != "nt":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                process.kill()
+            process.communicate()
+            raise RuntimeError("Office-to-PDF conversion timed out") from None
+        generated = converted / f"{source.stem}.pdf"
+        if process.returncode != 0 or not generated.is_file():
+            raise RuntimeError("LibreOffice failed to convert the document")
+        try:
+            with pymupdf.open(generated) as document:
+                if not document.is_pdf or document.needs_pass or document.page_count < 1:
+                    raise ValueError("Invalid converted PDF")
         except Exception:
-            story.append(Paragraph(f"Document: {os.path.basename(input_path)}", styles['Heading1']))
-            
-    elif ext in [".xlsx", ".xls", ".csv"]:
-        rows_data = []
-        if ext == ".csv":
-            with open(input_path, "r", encoding="utf-8-sig", errors="ignore") as f:
-                reader = csv.reader(f)
-                rows_data = [row for row in reader][:100]
-        else:
-            try:
-                import openpyxl
-                wb = openpyxl.load_workbook(input_path, data_only=True)
-                sheet = wb.active
-                for row in sheet.iter_rows(values_only=True):
-                    rows_data.append([str(c or "") for c in row])
-                    if len(rows_data) >= 100:
-                        break
-            except Exception:
-                rows_data = [["Excel Document", os.path.basename(input_path)]]
-                
-        if rows_data:
-            table = Table(rows_data)
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563eb')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ]))
-            story.append(table)
-            
-    else:
-        with open(input_path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                if line.strip():
-                    story.append(Paragraph(line.strip(), styles['Normal']))
-                    story.append(Spacer(1, 4))
-                    
-    if not story:
-        story.append(Paragraph(f"Converted File: {os.path.basename(input_path)}", styles['Heading1']))
-        
-    doc.build(story)
-    return output_pdf
+            raise RuntimeError("LibreOffice did not produce a valid PDF") from None
+        os.replace(generated, destination)
+    return str(destination)

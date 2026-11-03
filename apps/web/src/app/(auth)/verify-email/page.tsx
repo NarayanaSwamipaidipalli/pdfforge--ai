@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { FileCheck2, ArrowRight, ShieldCheck, AlertCircle, CheckCircle2, MailCheck, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API_BASE = '';
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams();

@@ -34,7 +34,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getResponse()
         : null;
 
-    const message =
+    const message = status >= 500 ? 'Internal server error occurred' :
       typeof exceptionResponse === 'object' && exceptionResponse !== null && 'message' in exceptionResponse
         ? (exceptionResponse as any).message
         : exception instanceof Error
@@ -44,7 +44,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const errorBody = {
       statusCode: status,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: request.path,
       method: request.method,
       message,
     };
@@ -52,14 +52,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (status >= 500) {
       if (Sentry && typeof Sentry.captureException === 'function') {
         try {
-          Sentry.captureException(exception);
+          Sentry.captureException(new Error(`HTTP ${status} at ${request.method} ${request.path}`));
         } catch {
           // ignore Sentry reporting failure
         }
       }
-      this.logger.error(`HTTP ${status} Error at ${request.method} ${request.url}:`, (exception as Error)?.stack);
+      this.logger.error(`HTTP ${status} at ${request.method} ${request.path}`);
     } else {
-      this.logger.warn(`HTTP ${status} Client Exception at ${request.method} ${request.url}: ${JSON.stringify(message)}`);
+      this.logger.warn(`HTTP ${status} at ${request.method} ${request.path}`);
     }
 
     response.status(status).json(errorBody);

@@ -1,28 +1,46 @@
+# Deployment is manual. Validate and review this Blueprint before applying it.
+# Existing schemas require the documented migration preflight; never reset a database.
+envVarGroups:
+  - name: pdfforge-shared
+    envVars:
+      - key: WORKER_CALLBACK_SECRET
+        generateValue: true
+      - key: AWS_REGION
+        value: us-east-1
+      - key: S3_BUCKET_NAME
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+
 services:
-  # Next.js 15 Web Application
   - type: web
     name: pdfforge-web
-    env: node
-    plan: standard
-    buildCommand: cd apps/web && npm install && npm run build
-    startCommand: cd apps/web && npm start
+    runtime: docker
+    plan: 0.5c-512mb
+    dockerContext: ./apps/web
+    dockerfilePath: ./apps/web/Dockerfile
+    healthCheckPath: /login
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: NEXT_PUBLIC_API_URL
-        value: https://pdfforge-api.onrender.com
-      - key: NEXT_PUBLIC_APP_URL
-        value: https://pdfforge.onrender.com
+      - key: PORT
+        value: 3000
+      - key: API_GATEWAY_HOSTPORT
+        fromService:
+          type: web
+          name: pdfforge-api
+          property: hostport
 
-  # NestJS 10 API Gateway
   - type: web
     name: pdfforge-api
-    env: node
-    plan: standard
-    buildCommand: cd apps/api && npm install && npm run prisma:generate && npm run build
-    preDeployCommand: cd apps/api && npx prisma migrate deploy
-    startCommand: cd apps/api && npm run start:prod
+    runtime: docker
+    plan: 0.5c-512mb
+    dockerContext: ./apps/api
+    dockerfilePath: ./apps/api/Dockerfile
+    preDeployCommand: node node_modules/prisma/build/index.js migrate deploy
+    healthCheckPath: /api/v1/health
     envVars:
+      - fromGroup: pdfforge-shared
       - key: NODE_ENV
         value: production
       - key: PORT
@@ -33,48 +51,116 @@ services:
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: pdfforge-redis
           property: connectionString
-      - key: PDF_WORKER_URL
-        value: https://pdfforge-worker.onrender.com
+      - key: PDF_WORKER_HOSTPORT
+        fromService:
+          type: web
+          name: pdfforge-worker
+          property: hostport
+      - key: API_GATEWAY_HOSTPORT
+        fromService:
+          type: web
+          name: pdfforge-api
+          property: hostport
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
-      - key: WORKER_CALLBACK_SECRET
-        value: pdfforge-worker-internal-secret
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALLBACK_URL
+        sync: false
+      - key: ENABLE_STRIPE
+        value: false
+      - key: ENABLE_RAZORPAY
+        value: false
+      - key: ENABLE_PAYPAL
+        value: false
 
-  # Python FastAPI & Celery Engine
+  # Same production Docker image supplies FastAPI and the separate Celery process.
   - type: web
     name: pdfforge-worker
-    env: python
-    plan: standard
-    buildCommand: pip install -r services/pdf-worker/requirements.txt
-    startCommand: cd services/pdf-worker && uvicorn app.main:app --host 0.0.0.0 --port 8000
+    runtime: docker
+    plan: 1c-2g
+    dockerContext: ./services/pdf-worker
+    dockerfilePath: ./services/pdf-worker/Dockerfile
+    healthCheckPath: /health
     envVars:
-      - key: CELERY_BROKER_URL
+      - fromGroup: pdfforge-shared
+      - key: ENVIRONMENT
+        value: production
+      - key: PORT
+        value: 8000
+      - key: API_GATEWAY_HOSTPORT
         fromService:
-          type: redis
-          name: pdfforge-redis
-          property: connectionString
+          type: web
+          name: pdfforge-api
+          property: hostport
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: pdfforge-redis
           property: connectionString
-      - key: PYTHONWARNINGS
-        value: ignore::FutureWarning:fitz
-      - key: WORKER_CALLBACK_SECRET
-        value: pdfforge-worker-internal-secret
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: pdfforge-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: pdfforge-redis
+          property: connectionString
+
+  - type: worker
+    name: pdfforge-celery
+    runtime: docker
+    plan: 1c-2g
+    dockerContext: ./services/pdf-worker
+    dockerfilePath: ./services/pdf-worker/Dockerfile
+    dockerCommand: celery -A app.celery_app.celery_app worker --loglevel=warning --concurrency=2 --max-tasks-per-child=10
+    envVars:
+      - fromGroup: pdfforge-shared
+      - key: ENVIRONMENT
+        value: production
+      - key: API_GATEWAY_HOSTPORT
+        fromService:
+          type: web
+          name: pdfforge-api
+          property: hostport
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: pdfforge-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: pdfforge-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: pdfforge-redis
+          property: connectionString
+
+  - type: keyvalue
+    name: pdfforge-redis
+    plan: 256mb
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
 
 databases:
   - name: pdfforge-postgres
-    plan: standard
+    plan: basic-256mb
     postgresMajorVersion: 16
     databaseName: pdfforge_db
     user: pdfforge
-
-  - name: pdfforge-redis
-    plan: standard
-    type: redis

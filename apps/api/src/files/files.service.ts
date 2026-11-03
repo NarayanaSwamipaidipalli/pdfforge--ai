@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, ForbiddenException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, ForbiddenException, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -14,6 +14,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PrismaService } from '../prisma/prisma.service';
+import { effectivePlan, PLAN_LIMITS } from '../common/effective-plan';
 import { PresignUploadDto, InitiateMultipartDto, CompleteMultipartDto } from './dto/file.dto';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -36,8 +37,8 @@ export class FilesService implements OnModuleInit {
   ) {
     const region = this.configService.get<string>('AWS_REGION', 'us-east-1');
     const endpoint = this.configService.get<string>('S3_ENDPOINT', ''); // MinIO support
-    const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID', 'minioadmin');
-    const secretAccessKey = this.configService.get<string>('AWS_SECRET_ACCESS_KEY', 'minioadmin');
+    const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
+    const secretAccessKey = this.configService.get<string>('AWS_SECRET_ACCESS_KEY');
 
     this.bucketName = this.configService.get<string>('S3_BUCKET_NAME', 'pdfforge-documents');
 
@@ -45,10 +46,10 @@ export class FilesService implements OnModuleInit {
       region,
       endpoint: endpoint ? endpoint : undefined,
       forcePathStyle: !!endpoint,
-      credentials: {
+      credentials: accessKeyId && secretAccessKey ? {
         accessKeyId,
         secretAccessKey,
-      },
+      } : undefined,
     });
 
     const publicEndpoint = this.configService.get<string>(
@@ -60,10 +61,10 @@ export class FilesService implements OnModuleInit {
       region,
       endpoint: publicEndpoint,
       forcePathStyle: !!publicEndpoint,
-      credentials: {
+      credentials: accessKeyId && secretAccessKey ? {
         accessKeyId,
         secretAccessKey,
-      },
+      } : undefined,
     });
   }
 
@@ -71,7 +72,8 @@ export class FilesService implements OnModuleInit {
     try {
       await this.s3Client.send(new HeadBucketCommand({ Bucket: this.bucketName }));
     } catch (err: any) {
-      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+      if (this.configService.get<string>('S3_AUTO_CREATE_BUCKET') === 'true' &&
+          (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404)) {
         try {
           await this.s3Client.send(new CreateBucketCommand({ Bucket: this.bucketName }));
           this.logger.log(`Created default S3 bucket: ${this.bucketName}`);
@@ -82,7 +84,18 @@ export class FilesService implements OnModuleInit {
     }
   }
 
+  private async assertUploadQuota(bytes: number, userId?: string) {
+    if (!userId) throw new UnauthorizedException('Authentication is required');
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.isBanned) throw new UnauthorizedException('Account is unavailable');
+    const plan = await effectivePlan(this.prisma, user);
+    if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > PLAN_LIMITS[plan].maxFileBytes) {
+      throw new BadRequestException('File size exceeds the limit for your current plan');
+    }
+  }
+
   async generatePresignedUpload(dto: PresignUploadDto, userId?: string) {
+    await this.assertUploadQuota(dto.fileSizeBytes, userId);
     const allowedMime = [
       'application/pdf',
       'application/msword',
@@ -145,6 +158,7 @@ export class FilesService implements OnModuleInit {
 
   // S3 Multipart / Chunked Upload for 500MB+ Files
   async initiateMultipartUpload(dto: InitiateMultipartDto, userId?: string) {
+    await this.assertUploadQuota(dto.fileSizeBytes, userId);
     const fileId = uuidv4();
     const extension = dto.fileName.split('.').pop() || 'pdf';
     const s3Key = `uploads/multipart/${new Date().toISOString().slice(0, 10)}/${fileId}.${extension}`;

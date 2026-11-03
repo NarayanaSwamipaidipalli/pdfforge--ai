@@ -236,10 +236,7 @@ export default function ToolPage({ params }: ToolPageProps) {
     setIsProcessing(true);
     setProcessingStep(1);
 
-    const envApi = process.env.NEXT_PUBLIC_API_URL || '';
-    const API_BASE = envApi
-      ? (envApi.endsWith('/api/v1') ? envApi : `${envApi}/api/v1`)
-      : (typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : 'http://localhost:4000/api/v1');
+    const API_BASE = '/api/v1';
 
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null;

@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+.next
+**/.next
+.git
+**/.git
+migration-backups
+**/migration-backups
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+.remediation
+*.tsbuildinfo
+coverage
+*.log

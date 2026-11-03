@@ -23,6 +23,7 @@ import {
   RefreshTokenDto,
   GoogleAuthDto,
   GithubAuthDto,
+  GoogleOAuthStartDto,
   ForgotPasswordDto,
   ResetPasswordDto,
   VerifyEmailDto,
@@ -46,7 +47,7 @@ export class AuthController {
     if (!cookieHeader) return {};
     return cookieHeader.split(';').reduce((acc, c) => {
       const [key, val] = c.trim().split('=');
-      if (key && val) acc[key] = decodeURIComponent(val);
+      if (key && val) { try { acc[key] = decodeURIComponent(val); } catch { /* Ignore malformed cookies. */ } }
       return acc;
     }, {} as Record<string, string>);
   }
@@ -95,20 +96,46 @@ export class AuthController {
     return result;
   }
 
+  private oauthCookieOptions() {
+    return { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const,
+      path: '/api/v1/auth', maxAge: 10 * 60 * 1000 };
+  }
+
+  private async consumeOAuthState(req: Request, res: Response, state?: string, redirectUri?: string, userId?: string) {
+    const cookie = this.parseCookies(req.headers.cookie)['pdfforge_oauth_state'];
+    const { maxAge, ...clearOptions } = this.oauthCookieOptions();
+    res.clearCookie('pdfforge_oauth_state', clearOptions);
+    return this.authService.validateGoogleOAuthState(state, cookie, redirectUri, userId);
+  }
+
   @Get('google/url')
-  @ApiOperation({ summary: 'Retrieve official Google OAuth 2.0 authorization URL' })
-  getGoogleAuthUrl(
-    @Query('state') state?: string,
+  @ApiOperation({ summary: 'Begin state-bound Google OAuth login' })
+  async getGoogleAuthUrl(
+    @Res({ passthrough: true }) res: Response,
     @Query('redirect_uri') redirectUri?: string,
   ) {
-    return {
-      url: this.authService.getGoogleAuthUrl(state, redirectUri),
-      clientId: this.authService.getGoogleClientId(),
-    };
+    const { cookie, ...result } = await this.authService.beginGoogleOAuth(redirectUri);
+    res.cookie('pdfforge_oauth_state', cookie, this.oauthCookieOptions());
+    res.setHeader('Cache-Control', 'no-store');
+    return result;
+  }
+
+  @Post('google/link-url')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  async getGoogleLinkUrl(
+    @CurrentUser('sub') userId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: GoogleOAuthStartDto,
+  ) {
+    const { cookie, ...result } = await this.authService.beginGoogleOAuth(dto?.redirectUri, userId);
+    res.cookie('pdfforge_oauth_state', cookie, this.oauthCookieOptions());
+    res.setHeader('Cache-Control', 'no-store');
+    return result;
   }
 
   @Get('google/callback')
-  @ApiOperation({ summary: 'Google OAuth 2.0 redirect callback' })
+  @ApiOperation({ summary: 'Google OAuth callback with state validation' })
   async googleCallback(
     @Query('code') code: string,
     @Query('state') state: string,
@@ -117,33 +144,18 @@ export class AuthController {
     @Res() res: Response,
   ) {
     const frontendUrl = this.authService.getFrontendUrl();
-    if (error) {
-      return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error)}`);
-    }
-    if (!code) {
-      return res.redirect(`${frontendUrl}/login?error=missing_authorization_code`);
-    }
-
     try {
-      const ip = (req.headers['x-forwarded-for'] as string) || req.ip || '127.0.0.1';
-      const userAgent = (req.headers['user-agent'] as string) || 'Web Browser';
-      const result = await this.authService.googleAuth({ code }, ip, userAgent);
-
+      const flow = await this.consumeOAuthState(req, res, state);
+      if (error || !code) throw new UnauthorizedException('Google authentication failed');
+      const result = await this.authService.googleAuth({ code, redirectUri: flow.redirectUri, nonce: flow.nonce }, req.ip, req.headers['user-agent']);
       res.cookie('pdfforge_refresh_token', result.tokens.refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        path: '/',
+        httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000, path: '/',
       });
-
-      return res.redirect(
-        `${frontendUrl}/auth/callback?token=${result.tokens.accessToken}&refreshToken=${result.tokens.refreshToken}&userId=${result.user.id}&plan=${result.user.plan}&role=${result.user.role}`,
-      );
-    } catch (err: any) {
-      return res.redirect(
-        `${frontendUrl}/login?error=${encodeURIComponent(err.message || 'Google authentication failed')}`,
-      );
+      // Browser session bootstrap uses the HttpOnly cookie. Credentials never enter redirect URLs.
+      return res.redirect(frontendUrl + '/auth/callback?oauth=success');
+    } catch {
+      return res.redirect(frontendUrl + '/login?error=google_authentication_failed');
     }
   }
 
@@ -159,11 +171,14 @@ export class AuthController {
     const ip = (req.headers['x-forwarded-for'] as string) || req.ip || '127.0.0.1';
     const userAgent = (req.headers['user-agent'] as string) || 'Web Browser';
 
+    const flow = dto.code ? await this.consumeOAuthState(req, res, dto.state, dto.redirectUri) : null;
     const result = await this.authService.googleAuth(
       {
         idToken: dto.idToken || dto.credential,
         code: dto.code,
+        accessToken: dto.accessToken,
         redirectUri: dto.redirectUri,
+        nonce: flow?.nonce,
       },
       ip,
       userAgent,
@@ -187,15 +202,7 @@ export class AuthController {
     @Body() dto: GithubAuthDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.githubAuth(dto.code);
-    res.cookie('pdfforge_refresh_token', result.tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-    });
-    return result;
+    return this.authService.githubAuth(dto.code);
   }
 
   @Post('forgot-password')
@@ -270,7 +277,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const cookies = this.parseCookies(req.headers.cookie);
-    const refreshToken = dto.refreshToken || cookies['pdfforge_refresh_token'];
+    const refreshToken = dto?.refreshToken || cookies['pdfforge_refresh_token'];
     if (!refreshToken) {
       throw new UnauthorizedException('Refresh token is required');
     }
@@ -381,8 +388,11 @@ export class AuthController {
   async connectGoogle(
     @CurrentUser('sub') userId: string,
     @Body() dto: ConnectGoogleDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.connectGoogle(userId, dto);
+    const flow = dto.code ? await this.consumeOAuthState(req, res, dto.state, dto.redirectUri, userId) : null;
+    return this.authService.connectGoogle(userId, dto, flow?.nonce);
   }
 
   @UseGuards(JwtAuthGuard)

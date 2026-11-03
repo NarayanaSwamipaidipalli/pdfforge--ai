@@ -1,58 +1,63 @@
 'use client';
 
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
 import { FileCheck2, Loader2, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
+const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
+const API_V1 = `${API_BASE}/api/v1`;
+
 function CallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { setAuth, syncProfile } = useAuthStore();
+  const { setAuth, syncProfile, refreshTokens } = useAuthStore();
   const [error, setError] = useState<string | null>(null);
+  const operation = useRef<Promise<string> | null>(null);
 
   useEffect(() => {
-    const processCallback = async () => {
-      const errorParam = searchParams.get('error');
-      if (errorParam) {
-        setError(decodeURIComponent(errorParam));
-        return;
-      }
-
-      const token = searchParams.get('token');
-      const userId = searchParams.get('userId');
-      const plan = (searchParams.get('plan') as any) || 'FREE';
-      const role = (searchParams.get('role') as any) || 'USER';
-
-      if (!token) {
-        setError('No authentication token received from identity provider.');
-        return;
-      }
-
-      try {
-        setAuth(
-          {
-            id: userId || 'google_user',
-            email: 'Authenticated via Google',
-            name: null,
-            role,
-            plan,
-          },
-          token,
-        );
-
-        // Fetch full verified user profile from /auth/me
+    let active = true;
+    if (!operation.current) {
+      operation.current = (async () => {
+        const code = searchParams.get('code');
+        const state = searchParams.get('state');
+        // Remove credentials and one-time codes before any fetch can attach them as a referrer.
+        window.history.replaceState({}, '', '/auth/callback');
+        if (searchParams.get('error')) throw new Error('Google authentication failed. Please try again.');
+        const linking = !!state && sessionStorage.getItem('pdfforge_google_link_state') === state;
+        if (code) {
+          const existingToken = useAuthStore.getState().token;
+          if (!state || (linking && !existingToken)) throw new Error('Your sign-in session expired. Please try again.');
+          const res = await fetch(API_V1 + (linking ? '/auth/google/connect' : '/auth/google'), {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json', ...(linking ? { Authorization: 'Bearer ' + existingToken } : {}) },
+            body: JSON.stringify({ code, state, redirectUri: window.location.origin + '/auth/callback' }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'Google authentication failed');
+          sessionStorage.removeItem('pdfforge_google_link_state');
+          if (linking) {
+            await syncProfile();
+            return '/account';
+          }
+          setAuth({ ...data.user, name: data.user.name || null }, data.tokens.accessToken);
+          await syncProfile();
+          return '/dashboard';
+        }
+        if (searchParams.get('oauth') !== 'success') throw new Error('No authorization response received. Please sign in again.');
+        const accessToken = await refreshTokens();
+        if (!accessToken) throw new Error('Your sign-in session expired. Please try again.');
         await syncProfile();
-        const isLinking = searchParams.get('link') === 'true';
-        router.push(isLinking ? '/account' : '/dashboard');
-      } catch (err: any) {
-        setError(err.message || 'Failed to initialize authenticated session.');
-      }
-    };
-
-    processCallback();
-  }, [searchParams, router, setAuth, syncProfile]);
+        if (!useAuthStore.getState().user) throw new Error('Could not load your signed-in account');
+        return '/dashboard';
+      })();
+    }
+    operation.current.then((target) => { if (active) router.replace(target); })
+      .catch((err) => { if (active) setError(err.message || 'Google authentication failed'); });
+    return () => { active = false; };
+  }, [searchParams, router, setAuth, syncProfile, refreshTokens]);
 
   if (error) {
     return (
@@ -85,7 +90,7 @@ function CallbackContent() {
         <div>
           <h2 className="text-base font-semibold text-zinc-900">Securing your session...</h2>
           <p className="text-xs text-zinc-500 mt-1">
-            Verifying Google OAuth credentials and redirecting to your dashboard.
+            Verifying Google OAuth credentials and redirecting to your workspace.
           </p>
         </div>
         <div className="flex justify-center pt-2">

@@ -1,4 +1,4 @@
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const rawApiUrl = '/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 const API_V1 = `${API_BASE}/api/v1`;
 

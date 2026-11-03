@@ -28,7 +28,7 @@ import {
   LogOut,
 } from 'lucide-react';
 
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 const API_V1 = `${API_BASE}/api/v1`;
 
@@ -206,11 +206,16 @@ export default function AccountPage() {
   const handleConnectGoogle = async () => {
     setGoogleActionLoading(true);
     try {
-      const callbackTarget = `${window.location.origin}/auth/callback?link=true`;
-      const res = await fetch(`${API_V1}/auth/google/url?redirect_uri=${encodeURIComponent(callbackTarget)}`);
+      const callbackTarget = `${window.location.origin}/auth/callback`;
+      const res = await fetch(`${API_V1}/auth/google/link-url`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ redirectUri: callbackTarget }),
+      });
       const data = await res.json();
 
-      if (data.url) {
+      if (res.ok && data.url) {
+        sessionStorage.setItem('pdfforge_google_link_state', new URL(data.url).searchParams.get('state') || '');
         window.location.href = data.url;
       } else {
         throw new Error('Google authorization URL unavailable');

@@ -6,6 +6,12 @@ RUN useradd --create-home --uid 10001 worker
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    fonts-dejavu-core \
+    fonts-liberation \
+    fontconfig \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
@@ -13,14 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
-RUN chown -R worker:worker /app
+COPY --chown=worker:worker . .
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
+ENV HOME=/home/worker
 ENV PYTHONWARNINGS="ignore::FutureWarning:fitz"
 
 EXPOSE 8000
 USER worker
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -12,6 +12,8 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/roles.decorator';
 
 @ApiTags('AI Document Intelligence')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('api/v1/ai')
 export class AiController {
   constructor(private readonly aiService: AiService) {}
@@ -42,19 +44,19 @@ export class AiController {
 
   @Post('extract/invoice')
   @ApiOperation({ summary: 'Extract structured financial line-items, tax, and vendor data from invoice' })
-  async extractInvoice(@Body() dto: AiExtractInvoiceDto) {
-    return this.aiService.extractInvoice(dto.fileId, dto.provider, dto.model);
+  async extractInvoice(@Body() dto: AiExtractInvoiceDto, @CurrentUser('sub') userId: string) {
+    return this.aiService.extractInvoice(dto.fileId, dto.provider, dto.model, userId);
   }
 
   @Post('analyze/contract')
   @ApiOperation({ summary: 'Automated contract risk scoring, liability audit, and clause extraction' })
-  async analyzeContract(@Body() dto: AiAnalyzeContractDto) {
-    return this.aiService.analyzeContract(dto.fileId, dto.provider, dto.model);
+  async analyzeContract(@Body() dto: AiAnalyzeContractDto, @CurrentUser('sub') userId: string) {
+    return this.aiService.analyzeContract(dto.fileId, dto.provider, dto.model, userId);
   }
 
   @Post('translate')
   @ApiOperation({ summary: 'Translate document contents while preserving layout and typography' })
-  async translate(@Body() dto: AiTranslateDocumentDto) {
-    return this.aiService.translateDocument(dto);
+  async translate(@Body() dto: AiTranslateDocumentDto, @CurrentUser('sub') userId: string) {
+    return this.aiService.translateDocument(dto, userId);
   }
 }

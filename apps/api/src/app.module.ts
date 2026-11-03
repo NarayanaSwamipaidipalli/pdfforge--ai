@@ -12,12 +12,15 @@ import { BillingModule } from './billing/billing.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
+import { validateEnvironment } from './common/environment';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      ignoreEnvFile: process.env.LOAD_LOCAL_ENV !== 'true' || process.env.NODE_ENV === 'production',
       envFilePath: ['.env.local', '.env'],
+      validate: validateEnvironment,
     }),
     ThrottlerModule.forRoot([
       {

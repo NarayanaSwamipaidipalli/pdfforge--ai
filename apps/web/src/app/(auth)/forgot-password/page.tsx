@@ -4,14 +4,13 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { FileCheck2, ArrowRight, ShieldCheck, AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API_BASE = '';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [devToken, setDevToken] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,10 +28,7 @@ export default function ForgotPasswordPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Request could not be processed');
 
-      setSuccessMessage(data.message || 'Password reset link has been dispatched to your email.');
-      if (data.resetToken) {
-        setDevToken(data.resetToken);
-      }
+      setSuccessMessage(data.message || 'Your password recovery request has been received.');
     } catch (err: any) {
       setError(err.message || 'Failed to request password reset');
     } finally {
@@ -75,23 +71,10 @@ export default function ForgotPasswordPage() {
             <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-2">
               <div className="flex items-center gap-2 font-semibold">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Verification Link Dispatched</span>
+                <span>Recovery Request Received</span>
               </div>
               <p className="text-[11px] leading-relaxed">{successMessage}</p>
 
-              {devToken && (
-                <div className="mt-3 pt-3 border-t border-emerald-200/60">
-                  <div className="text-[10px] uppercase font-bold text-emerald-900 mb-1">
-                    Direct Reset Link:
-                  </div>
-                  <Link
-                    href={`/reset-password?token=${encodeURIComponent(devToken)}`}
-                    className="text-blue-600 underline font-semibold text-[11px] break-all"
-                  >
-                    Click here to proceed to Set New Password
-                  </Link>
-                </div>
-              )}
             </div>
           )}
 

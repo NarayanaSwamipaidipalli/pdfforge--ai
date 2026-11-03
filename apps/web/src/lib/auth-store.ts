@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 const API_V1 = `${API_BASE}/api/v1`;
 
@@ -19,6 +19,8 @@ export interface AuthUser {
   storageLimitBytes?: number | string;
   createdAt?: string;
 }
+
+let refreshInFlight: Promise<string | null> | null = null;
 
 interface AuthState {
   user: AuthUser | null;
@@ -96,10 +98,13 @@ export const useAuthStore = create<AuthState>()(
       },
 
       refreshTokens: async () => {
+        if (refreshInFlight) return refreshInFlight;
+        refreshInFlight = (async () => {
         try {
           const res = await fetch(`${API_V1}/auth/refresh`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            body: '{}',
             credentials: 'include',
           });
 
@@ -122,6 +127,8 @@ export const useAuthStore = create<AuthState>()(
           console.warn('Automatic token refresh failed:', err);
         }
         return null;
+        })();
+        try { return await refreshInFlight; } finally { refreshInFlight = null; }
       },
 
       syncProfile: async () => {

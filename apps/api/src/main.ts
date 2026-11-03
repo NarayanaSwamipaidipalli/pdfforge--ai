@@ -4,6 +4,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import helmet from 'helmet';
+import { corsOriginCheck, corsOrigins } from './common/environment';
 
 let Sentry: any = null;
 try {
@@ -68,7 +69,7 @@ async function bootstrap() {
     rawBody: true,
     logger: structuredLogger,
     cors: {
-      origin: true,
+      origin: corsOriginCheck(corsOrigins(process.env)),
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key', 'Accept'],

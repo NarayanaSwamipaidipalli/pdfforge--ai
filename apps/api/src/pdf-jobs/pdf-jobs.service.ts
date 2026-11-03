@@ -1,9 +1,11 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { effectivePlan, PLAN_LIMITS, quotaTransaction } from '../common/effective-plan';
 import { FilesService } from '../files/files.service';
 import { CreatePdfJobDto, WorkerCallbackDto } from './dto/job.dto';
 import axios from 'axios';
+import { timingSafeEqual } from 'crypto';
 
 @Injectable()
 export class PdfJobsService {
@@ -19,11 +21,14 @@ export class PdfJobsService {
   }
 
   async createJob(dto: CreatePdfJobDto, userId?: string, orgId?: string) {
+    if (!userId) throw new UnauthorizedException('Authentication is required');
     // 1. Verify files exist in storage
     const files = await this.prisma.fileRecord.findMany({
       where: {
         id: { in: dto.fileIds },
-        ...(userId ? { userId } : {}),
+        userId,
+        deletedAt: null,
+        expiresAt: { gt: new Date() },
       },
     });
 
@@ -35,16 +40,21 @@ export class PdfJobsService {
     const fileMap = new Map(files.map((f) => [f.id, f]));
     const orderedFiles = dto.fileIds.map((id) => fileMap.get(id)).filter(Boolean) as typeof files;
 
-    // 2. Check user daily conversion limits if on FREE tier
-    if (userId) {
-      const user = await this.prisma.user.findUnique({ where: { id: userId } });
-      if (user && user.plan === 'FREE' && user.conversionsToday >= 10) {
+    // Count/reserve today's attempts with the job insert in one serializable transaction.
+    const job = await quotaTransaction(this.prisma, async tx => {
+      const user = await tx.user.findUnique({ where: { id: userId } });
+      if (!user || user.isBanned) throw new UnauthorizedException('Account is unavailable');
+      const plan = await effectivePlan(tx, user);
+      if (orderedFiles.length > PLAN_LIMITS[plan].batch) throw new BadRequestException('Batch limit exceeded for your current plan');
+      if (orderedFiles.some(file => Number(file.fileSizeBytes) > PLAN_LIMITS[plan].maxFileBytes)) {
+        throw new BadRequestException('File size exceeds the limit for your current plan');
+      }
+      const now = new Date();
+      const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      if (plan === 'FREE' && await tx.processingJob.count({ where: { userId, createdAt: { gte: dayStart } } }) >= 10) {
         throw new BadRequestException('Free tier daily conversion limit reached (10/day). Please upgrade to Pro.');
       }
-    }
-
-    // 3. Create job record in PostgreSQL
-    const job = await this.prisma.processingJob.create({
+      return tx.processingJob.create({
       data: {
         tool: dto.tool,
         userId: userId || null,
@@ -59,6 +69,7 @@ export class PdfJobsService {
         })),
         parametersPayload: dto.parameters || {},
       },
+      });
     });
 
     // 4. Dispatch job to Python processing worker asynchronously
@@ -212,8 +223,9 @@ export class PdfJobsService {
   }
 
   verifyWorkerCallbackSecret(secret?: string) {
-    const expected = this.configService.get<string>('WORKER_CALLBACK_SECRET', 'pdfforge-worker-internal-secret');
-    if (!secret || secret !== expected) {
+    const expected = this.configService.get<string>('WORKER_CALLBACK_SECRET');
+    if (!expected || !secret || Buffer.byteLength(secret) !== Buffer.byteLength(expected) ||
+        !timingSafeEqual(Buffer.from(secret), Buffer.from(expected))) {
       throw new UnauthorizedException('Invalid worker callback secret');
     }
   }
@@ -296,7 +308,7 @@ export class PdfJobsService {
         'API_GATEWAY_INTERNAL_URL',
         process.env.NODE_ENV === 'production' ? 'http://api-gateway:4000' : 'http://localhost:4000',
       );
-      const workerSecret = this.configService.get<string>('WORKER_CALLBACK_SECRET', 'pdfforge-worker-internal-secret');
+      const workerSecret = this.configService.get<string>('WORKER_CALLBACK_SECRET');
       if (!workerSecret) {
         throw new Error('WORKER_CALLBACK_SECRET is required');
       }
@@ -321,27 +333,11 @@ export class PdfJobsService {
         },
       );
     } catch (err) {
-      this.logger.warn(
-        `Python Worker not reachable at ${this.workerUrl} (simulating async pipeline): ${(err as Error).message}`,
-      );
-      // Graceful local development simulation fallback so the system is fully functional out of the box
-      setTimeout(async () => {
-        try {
-          await this.prisma.processingJob.update({
-            where: { id: jobId },
-            data: {
-              status: 'COMPLETED',
-              progress: 100,
-              outputFileKey: `processed/${files[0]?.id || jobId}_result.pdf`,
-              outputFileSizeBytes: BigInt(files[0] ? 1048576 : 524288),
-              durationMs: 1420,
-              completedAt: new Date(),
-            },
-          });
-        } catch {
-          // Ignore
-        }
-      }, 2000);
+      this.logger.warn('PDF worker dispatch failed');
+      await this.prisma.processingJob.updateMany({
+        where: { id: jobId, status: { in: ['QUEUED', 'PROCESSING'] } },
+        data: { status: 'FAILED', errorMessage: 'Processing service is unavailable. Please retry later.', completedAt: new Date() },
+      });
     }
   }
 }

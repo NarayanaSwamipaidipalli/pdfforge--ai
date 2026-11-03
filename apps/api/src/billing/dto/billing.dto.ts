@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsEnum, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsNotEmpty, IsEnum, IsOptional, IsNumber, IsIn, Matches, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export enum BillingProvider {
@@ -31,12 +31,12 @@ export class CreateCheckoutSessionDto {
   provider?: BillingProvider;
 
   @ApiProperty({ example: 'monthly', enum: ['monthly', 'yearly'], required: false })
-  @IsString()
+  @IsIn(['monthly', 'yearly'])
   @IsOptional()
   interval?: 'monthly' | 'yearly';
 
   @ApiProperty({ example: 'monthly', enum: ['monthly', 'yearly'], required: false })
-  @IsString()
+  @IsIn(['monthly', 'yearly'])
   @IsOptional()
   billingInterval?: 'monthly' | 'yearly';
 
@@ -55,16 +55,19 @@ export class VerifyPaymentDto {
   @ApiProperty({ example: 'order_rzp_123456' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(200)
   orderId: string;
 
   @ApiProperty({ example: 'pay_rzp_987654' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(200)
   paymentId: string;
 
   @ApiProperty({ example: 'hmac_sha256_signature_string' })
   @IsString()
   @IsNotEmpty()
+  @Matches(/^[a-fA-F0-9]{64}$/)
   signature: string;
 
   @ApiProperty({ enum: SubscriptionTier, example: SubscriptionTier.PRO, required: false })
@@ -78,7 +81,7 @@ export class VerifyPaymentDto {
   plan?: SubscriptionTier;
 
   @ApiProperty({ example: 'monthly', enum: ['monthly', 'yearly'], required: false })
-  @IsString()
+  @IsIn(['monthly', 'yearly'])
   @IsOptional()
   interval?: 'monthly' | 'yearly';
 }
@@ -90,7 +93,7 @@ export class CreatePayPalOrderDto {
   tier: SubscriptionTier;
 
   @ApiProperty({ example: 'monthly', enum: ['monthly', 'yearly'], required: false })
-  @IsString()
+  @IsIn(['monthly', 'yearly'])
   @IsOptional()
   interval?: 'monthly' | 'yearly';
 
@@ -104,6 +107,7 @@ export class CapturePayPalOrderDto {
   @ApiProperty({ example: 'PAYPAL-ORDER-12345' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(200)
   orderId: string;
 
   @ApiProperty({ enum: SubscriptionTier, example: SubscriptionTier.PRO, required: false })
@@ -117,7 +121,7 @@ export class CapturePayPalOrderDto {
   plan?: SubscriptionTier;
 
   @ApiProperty({ example: 'monthly', enum: ['monthly', 'yearly'], required: false })
-  @IsString()
+  @IsIn(['monthly', 'yearly'])
   @IsOptional()
   interval?: 'monthly' | 'yearly';
 }
@@ -134,7 +138,7 @@ export class ApplyCouponDto {
   tier: SubscriptionTier;
 
   @ApiProperty({ example: 'monthly', enum: ['monthly', 'yearly'], required: false })
-  @IsString()
+  @IsIn(['monthly', 'yearly'])
   @IsOptional()
   interval?: 'monthly' | 'yearly';
 }

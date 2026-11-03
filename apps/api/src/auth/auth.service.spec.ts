@@ -18,7 +18,7 @@ describe('AuthService', () => {
         findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
-        updateMany: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       organization: {
         create: jest.fn().mockResolvedValue({ id: 'org_1', slug: 'workspace' }),
@@ -141,39 +141,11 @@ describe('AuthService', () => {
       expect(prismaService.user.create).not.toHaveBeenCalled();
     });
 
-    it('should safely link Google account to existing email user', async () => {
+    it('requires authenticated linking when the email already has an account', async () => {
       jest.spyOn(service, 'verifyGoogleToken').mockResolvedValue(mockVerifiedGooglePayload);
-      // Not found by googleId
-      prismaService.user.findUnique.mockResolvedValueOnce(null);
-      // Found by email (Account Linking)
-      const existingEmailUser = {
-        id: 'local_user_1',
-        email: mockVerifiedGooglePayload.email,
-        name: 'Alex Local',
-        provider: 'LOCAL',
-        googleId: null,
-        globalRole: 'USER',
-        plan: 'FREE',
-      };
-      prismaService.user.findUnique.mockResolvedValueOnce(existingEmailUser);
-      prismaService.user.update.mockResolvedValue({
-        ...existingEmailUser,
-        googleId: mockVerifiedGooglePayload.googleId,
-        provider: 'GOOGLE_AND_LOCAL',
-        isEmailVerified: true,
-      });
-
-      const res = await service.googleAuth({ idToken: 'valid_google_token' });
-      expect(res.user.id).toBe('local_user_1');
-      expect(prismaService.user.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'local_user_1' },
-          data: expect.objectContaining({
-            googleId: 'google_123456789',
-            isEmailVerified: true,
-          }),
-        }),
-      );
+      prismaService.user.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'local_user_1' });
+      await expect(service.googleAuth({ idToken: 'verified_by_boundary' })).rejects.toThrow(UnauthorizedException);
+      expect(prismaService.user.update).not.toHaveBeenCalled();
     });
 
     it('should reject Google login if email is unverified', async () => {
@@ -201,7 +173,7 @@ describe('AuthService', () => {
       const salt = await bcrypt.genSalt(10);
       const hash = await bcrypt.hash(preHashed, salt);
 
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user_active_id' });
+      jwtService.verifyAsync.mockResolvedValue({ sub: 'user_active_id', purpose: 'refresh', jti: 'unique', exp: Date.now() / 1000 + 1000 });
       prismaService.user.findUnique.mockResolvedValue({
         id: 'user_active_id',
         email: 'active@pdfforge.ai',
@@ -212,9 +184,9 @@ describe('AuthService', () => {
       const tokens = await service.refreshTokens(plainRefreshToken);
       expect(tokens.accessToken).toBe('mock_token');
       expect(tokens.refreshToken).toBe('mock_token');
-      expect(prismaService.user.update).toHaveBeenCalledWith(
+      expect(prismaService.user.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'user_active_id' },
+          where: expect.objectContaining({ id: 'user_active_id' }),
           data: expect.objectContaining({
             refreshTokenHash: expect.any(String),
           }),

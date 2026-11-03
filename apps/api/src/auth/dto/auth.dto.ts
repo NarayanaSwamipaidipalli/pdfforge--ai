@@ -53,6 +53,16 @@ export class GoogleAuthDto {
   @IsOptional()
   code?: string;
 
+  @ApiProperty({ description: 'OAuth state returned by Google', required: false })
+  @IsString()
+  @IsOptional()
+  state?: string;
+
+  @ApiProperty({ description: 'OAuth 2.0 access token (rejected when provided)', required: false })
+  @IsString()
+  @IsOptional()
+  accessToken?: string;
+
   @ApiProperty({ description: 'Redirect URI used during authorization code flow', required: false })
   @IsString()
   @IsOptional()
@@ -64,6 +74,13 @@ export class GithubAuthDto {
   @IsString()
   @IsNotEmpty()
   code: string;
+}
+
+export class GoogleOAuthStartDto {
+  @ApiProperty({ description: 'One of the configured Google callback URIs', required: false })
+  @IsString()
+  @IsOptional()
+  redirectUri?: string;
 }
 
 export class ForgotPasswordDto {
@@ -156,6 +173,11 @@ export class ConnectGoogleDto {
   @IsString()
   @IsOptional()
   code?: string;
+
+  @ApiProperty({ description: 'OAuth state returned by Google', required: false })
+  @IsString()
+  @IsOptional()
+  state?: string;
 
   @ApiProperty({ description: 'Redirect URI used during authorization code flow', required: false })
   @IsString()

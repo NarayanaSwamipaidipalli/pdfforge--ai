@@ -133,6 +133,14 @@ def test_native_fallback_engine():
         print(f"✔ test_native_fallback_engine PASSED! (DOCX size: {os.path.getsize(docx_path)} bytes, Tables: {len(doc.tables)})")
 
 
+def load_tests(loader, tests, pattern):
+    # unittest discovery otherwise silently skips these existing module functions.
+    import unittest
+    return unittest.TestSuite(unittest.FunctionTestCase(test) for test in (
+        test_pdf_to_word_complete_flow, test_scanned_page_detection, test_native_fallback_engine,
+    ))
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("🧪 Running PDF-to-Word Engine Verification Suite")
