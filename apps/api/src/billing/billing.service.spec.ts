@@ -1,3 +1,5 @@
+import axios from 'axios';
+import * as crypto from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BillingService } from './billing.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,6 +40,11 @@ describe('BillingService', () => {
         findUnique: jest.fn(),
         create: jest.fn().mockResolvedValue({ id: 'evt_1' }),
       },
+      razorpayCheckout: {
+        create: jest.fn(),
+        findUnique: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       $transaction: jest.fn((callback) => callback(prisma)),
     };
 
@@ -77,9 +84,9 @@ describe('BillingService', () => {
       const providers = service.getEnabledProviders();
       expect(providers).toEqual({
         stripe: true,
-        razorpay: true,
+        razorpay: false,
         paypal: true,
-        providers: ['stripe', 'razorpay', 'paypal'],
+        providers: ['stripe', 'paypal'],
       });
     });
 
@@ -213,6 +220,78 @@ describe('BillingService', () => {
 
     it('rejects unverified PayPal capture without upgrading a user', async () => {
       await expect(service.capturePayPalOrder('user_1', { orderId: 'PAYPAL-1234', tier: SubscriptionTier.BUSINESS })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Razorpay verified test integration', () => {
+    const keyId = 'rzp_test_validpublicid';
+    const keySecret = 'test_private_secret_for_unit_tests';
+
+    function configureRazorpay() {
+      config.get.mockImplementation((key: string, defaultVal?: any) => {
+        const values: Record<string, string> = {
+          ENABLE_RAZORPAY: 'true',
+          RAZORPAY_KEY_ID: keyId,
+          RAZORPAY_KEY_SECRET: keySecret,
+          RAZORPAY_INR_PRO_MONTHLY_PAISE: '99000',
+        };
+        return values[key] ?? defaultVal;
+      });
+      config.getOrThrow = jest.fn((key: string) => config.get(key));
+    }
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('creates a real provider order with fixed server-side INR pricing', async () => {
+      configureRazorpay();
+      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', name: 'Test', email: 'test@example.com' });
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      const createOrder = jest.spyOn(axios, 'post').mockResolvedValueOnce({
+        data: { id: 'order_verified', amount: 99000, currency: 'INR' },
+      } as any);
+      const session = await service.createCheckoutSession('user_1', {
+        tier: SubscriptionTier.PRO, interval: 'monthly', provider: BillingProvider.RAZORPAY,
+      });
+      expect(createOrder).toHaveBeenCalledWith(
+        'https://api.razorpay.com/v1/orders',
+        expect.objectContaining({ amount: 99000, currency: 'INR' }),
+        expect.objectContaining({ auth: { username: keyId, password: keySecret } }),
+      );
+      expect(prisma.razorpayCheckout.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ orderId: 'order_verified', userId: 'user_1', amountPaise: 99000 }),
+      });
+      expect(session.orderId).toBe('order_verified');
+      expect(session.keyId).toBe(keyId);
+      expect(session).not.toHaveProperty('keySecret');
+    });
+
+    it('rejects captured payments with a mismatched amount', async () => {
+      configureRazorpay();
+      prisma.razorpayCheckout.findUnique.mockResolvedValue({
+        id: 'checkout_1', orderId: 'order_verified', userId: 'user_1',
+        tier: 'PRO', interval: 'monthly', amountPaise: 99000, currency: 'INR', status: 'PENDING',
+      });
+      jest.spyOn(axios, 'get').mockResolvedValueOnce({
+        data: { id: 'pay_verified', order_id: 'order_verified', status: 'captured', captured: true, amount: 500, currency: 'INR' },
+      } as any);
+      const signature = crypto.createHmac('sha256', keySecret).update('order_verified|pay_verified').digest('hex');
+      await expect(service.verifyRazorpayPayment('user_1', {
+        orderId: 'order_verified', paymentId: 'pay_verified', signature,
+      })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects checkout verification for a different user', async () => {
+      configureRazorpay();
+      prisma.razorpayCheckout.findUnique.mockResolvedValue({
+        id: 'checkout_1', orderId: 'order_verified', userId: 'owner',
+        tier: 'PRO', interval: 'monthly', amountPaise: 99000, currency: 'INR', status: 'PENDING',
+      });
+      const signature = crypto.createHmac('sha256', keySecret).update('order_verified|pay_verified').digest('hex');
+      await expect(service.verifyRazorpayPayment('attacker', {
+        orderId: 'order_verified', paymentId: 'pay_verified', signature,
+      })).rejects.toThrow(NotFoundException);
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
