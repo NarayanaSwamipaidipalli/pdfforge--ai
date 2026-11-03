@@ -14,10 +14,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: 'apps/api/package.json'
 
@@ -27,7 +27,22 @@ jobs:
 
       - name: Validate Prisma Schema
         working-directory: ./apps/api
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/pdfforge_ci
         run: npx prisma validate
+
+      - name: Generate Prisma Client
+        working-directory: ./apps/api
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/pdfforge_ci
+        run: npx prisma generate
+
+      - name: TypeScript API Build
+        working-directory: ./apps/api
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/pdfforge_ci
+          JWT_SECRET: ci-only-not-for-production-change-me
+        run: npm run build
 
       - name: Run Jest Unit Tests
         working-directory: ./apps/api

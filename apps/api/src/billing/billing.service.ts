@@ -51,8 +51,30 @@ export class BillingService {
   }
 
   isRazorpayEnabled(): boolean {
-    const flag = this.configService.get<string>('ENABLE_RAZORPAY', 'true');
-    return flag !== 'false';
+    const enabled = this.configService.get<string>('ENABLE_RAZORPAY', 'false') === 'true';
+    const keyId = this.configService.get<string>('RAZORPAY_KEY_ID', '');
+    const keySecret = this.configService.get<string>('RAZORPAY_KEY_SECRET', '');
+    return enabled && /^rzp_(test|live)_[A-Za-z0-9]+$/.test(keyId)
+      && !!keySecret && !/mock|changeme/i.test(keySecret)
+      && (keyId.startsWith('rzp_test_') || this.configService.get<string>('ALLOW_RAZORPAY_LIVE') === 'true');
+  }
+
+  private getRazorpayCredentials() {
+    if (!this.isRazorpayEnabled()) throw new BadRequestException('Razorpay is not configured for verified checkout');
+    return {
+      keyId: this.configService.getOrThrow<string>('RAZORPAY_KEY_ID'),
+      keySecret: this.configService.getOrThrow<string>('RAZORPAY_KEY_SECRET'),
+    };
+  }
+
+  private getRazorpayInrAmount(tier: SubscriptionTier, interval: string): number {
+    const key = `RAZORPAY_INR_${tier}_${interval.toUpperCase()}_PAISE`;
+    const value = this.configService.get<string>(key);
+    const amount = Number(value);
+    if (!value || !Number.isSafeInteger(amount) || amount < 100) {
+      throw new BadRequestException(`Razorpay INR amount is not configured for ${tier} (${interval})`);
+    }
+    return amount;
   }
 
   isPayPalEnabled(): boolean {
@@ -82,14 +104,7 @@ export class BillingService {
 
   verifyStripeWebhook(rawBody?: Buffer, signature?: string): Stripe.Event {
     const secret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET');
-    if (!secret || secret.startsWith('whsec_test') || !this.stripe) {
-      if (!rawBody) throw new UnauthorizedException('Missing webhook payload');
-      try {
-        return JSON.parse(rawBody.toString('utf8'));
-      } catch {
-        throw new UnauthorizedException('Invalid JSON webhook body');
-      }
-    }
+    if (!secret || !this.stripe) throw new UnauthorizedException('Stripe webhook verification is not configured');
     if (!rawBody || !signature) {
       throw new UnauthorizedException('Invalid Stripe webhook request or unconfigured secret');
     }
@@ -103,9 +118,7 @@ export class BillingService {
 
   verifyRazorpayWebhook(rawBody?: Buffer, signature?: string): void {
     const secret = this.configService.get<string>('RAZORPAY_WEBHOOK_SECRET');
-    if (!secret || secret.startsWith('rzp_test')) {
-      return; // Skip signature check in dev/test when secret is not configured
-    }
+    if (!secret) throw new UnauthorizedException('Razorpay webhook verification is not configured');
     if (!rawBody || !signature) {
       throw new UnauthorizedException('Invalid Razorpay webhook request or unconfigured secret');
     }
@@ -122,9 +135,7 @@ export class BillingService {
 
   async verifyPayPalWebhook(rawBody?: Buffer, headers: Record<string, string> = {}): Promise<void> {
     const webhookId = this.configService.get<string>('PAYPAL_WEBHOOK_ID');
-    if (!webhookId || webhookId.startsWith('mock_')) {
-      return; // Skip verification in dev/test
-    }
+    if (!webhookId) throw new UnauthorizedException('PayPal webhook verification is not configured');
     if (!rawBody) {
       throw new UnauthorizedException('Invalid PayPal webhook request');
     }
@@ -350,6 +361,7 @@ export class BillingService {
     const targetTier = dto.tier || dto.plan || SubscriptionTier.PRO;
     const interval = dto.interval || dto.billingInterval || 'monthly';
     const provider = dto.provider || BillingProvider.STRIPE;
+    if (!['monthly', 'yearly'].includes(interval)) throw new BadRequestException('Invalid billing interval');
 
     // Validate provider enabled status
     if (provider === BillingProvider.STRIPE && !this.isStripeEnabled()) {
@@ -399,27 +411,50 @@ export class BillingService {
       }
     }
 
-    // 1. RAZORPAY CHECKOUT
+    // 1. RAZORPAY CHECKOUT: create a real provider order and bind it to this user.
     if (provider === BillingProvider.RAZORPAY) {
-      const orderId = `order_rzp_${crypto.randomBytes(8).toString('hex')}`;
-      const amountPaise = Math.round(baseAmount * 100 * 83); // USD to INR conversion approximate
-      const keyId = this.configService.get<string>('RAZORPAY_KEY_ID', 'rzp_test_mock_enterprise');
-
+      if (dto.couponCode) throw new BadRequestException('Razorpay coupons require INR pricing support and are currently disabled');
+      const { keyId, keySecret } = this.getRazorpayCredentials();
+      const amountPaise = this.getRazorpayInrAmount(targetTier, interval);
+      const orderResponse = await axios.post(
+        'https://api.razorpay.com/v1/orders',
+        {
+          amount: amountPaise,
+          currency: 'INR',
+          receipt: `pdf_${crypto.randomBytes(10).toString('hex')}`,
+          notes: { product: 'PDFForge AI' },
+        },
+        { auth: { username: keyId, password: keySecret }, timeout: 10000 },
+      );
+      const order = orderResponse.data;
+      if (!order?.id || order.amount !== amountPaise || order.currency !== 'INR') {
+        throw new BadRequestException('Razorpay returned an invalid order');
+      }
+      await this.prisma.razorpayCheckout.create({
+        data: {
+          orderId: order.id,
+          userId,
+          tier: targetTier,
+          interval,
+          amountPaise,
+          currency: 'INR',
+        },
+      });
       return {
         provider: 'razorpay',
-        orderId,
+        orderId: order.id,
         amount: amountPaise,
         currency: 'INR',
         keyId,
         tier: targetTier,
         interval,
-        couponCode: appliedCoupon,
         user: { name: user.name || 'PDFForge Member', email: user.email },
       };
     }
 
     // 2. PAYPAL CHECKOUT
     if (provider === BillingProvider.PAYPAL) {
+      throw new BadRequestException('PayPal checkout unavailable until verified provider integration is implemented');
       const orderId = `PAYPAL-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       return {
         provider: 'paypal',
@@ -658,42 +693,61 @@ export class BillingService {
   // ============================================================================
 
   async verifyRazorpayPayment(userId: string, dto: VerifyPaymentDto) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
+    const { keySecret } = this.getRazorpayCredentials();
+    const expected = crypto.createHmac('sha256', keySecret)
+      .update(`${dto.orderId}|${dto.paymentId}`).digest('hex');
+    const supplied = dto.signature || '';
+    if (!/^[a-f0-9]{64}$/i.test(supplied) ||
+        !crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(supplied, 'hex'))) {
+      throw new BadRequestException('Invalid Razorpay payment signature');
+    }
+    return this.completeRazorpayCheckout(userId, dto.orderId, dto.paymentId);
+  }
 
-    const keySecret = this.configService.get<string>('RAZORPAY_KEY_SECRET', 'mock_rzp_secret');
-    const expectedSignature = crypto
-      .createHmac('sha256', keySecret)
-      .update(`${dto.orderId}|${dto.paymentId}`)
-      .digest('hex');
+  // Called by a verified Checkout callback or a signature-verified captured webhook.
+  private async completeRazorpayCheckout(userId: string, orderId: string, paymentId: string) {
+    const checkout = await this.prisma.razorpayCheckout.findUnique({ where: { orderId } });
+    if (!checkout || checkout.userId !== userId) throw new NotFoundException('Checkout order not found');
+    if (checkout.status === 'PAID' && checkout.paymentId === paymentId) {
+      return { success: true, message: 'Payment already verified', plan: checkout.tier };
+    }
+    if (checkout.status !== 'PENDING') throw new ConflictException('Checkout already processed');
 
-    const isValid = dto.signature === expectedSignature || keySecret === 'mock_rzp_secret';
-    if (!isValid) {
-      throw new BadRequestException('Invalid Razorpay cryptographic payment signature');
+    const { keyId, keySecret } = this.getRazorpayCredentials();
+    const paymentResponse = await axios.get(
+      `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
+      { auth: { username: keyId, password: keySecret }, timeout: 10000 },
+    );
+    const payment = paymentResponse.data;
+    if (!payment || payment.id !== paymentId || payment.order_id !== orderId ||
+        payment.status !== 'captured' || payment.captured !== true ||
+        payment.currency !== checkout.currency || payment.amount !== checkout.amountPaise) {
+      throw new BadRequestException('Payment has not been captured for the expected order and amount');
     }
 
-    const tier = dto.tier || dto.plan || SubscriptionTier.PRO;
-    const interval = dto.interval || 'monthly';
-    const amount = this.getTierBaseAmount(tier, interval);
-
     await this.prisma.$transaction(async (tx) => {
+      // Conditional update ensures repeated callbacks cannot activate twice.
+      const claimed = await tx.razorpayCheckout.updateMany({
+        where: { id: checkout.id, status: 'PENDING' },
+        data: { status: 'PAID', paymentId, completedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw new ConflictException('Checkout already processed');
       await this.activateOrRenewSubscription(tx, {
-        userId,
-        plan: tier,
-        interval,
+        userId: checkout.userId,
+        plan: checkout.tier as SubscriptionTier,
+        interval: checkout.interval as 'monthly' | 'yearly',
         provider: 'razorpay',
-        providerPaymentId: dto.paymentId,
-        amount,
-        currency: 'USD',
-        razorpaySubscriptionId: dto.orderId,
-        metadata: { orderId: dto.orderId, tier, interval },
+        providerPaymentId: paymentId,
+        amount: checkout.amountPaise / 100,
+        currency: 'INR',
+        metadata: { orderId, paymentId, mode: keyId.startsWith('rzp_test_') ? 'test' : 'live' },
+        couponCode: checkout.couponCode || undefined,
       });
     });
-
     return {
       success: true,
-      message: `Your account has been upgraded to ${tier} (${interval}) with Razorpay!`,
-      plan: tier,
+      message: `Payment captured; PDFForge AI ${checkout.tier} access activated`,
+      plan: checkout.tier,
     };
   }
 
@@ -702,6 +756,7 @@ export class BillingService {
   // ============================================================================
 
   async capturePayPalOrder(userId: string, dto: CapturePayPalOrderDto) {
+    throw new BadRequestException('PayPal capture unavailable until provider payment confirmation is implemented');
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
@@ -908,59 +963,21 @@ export class BillingService {
     });
   }
 
-  // B. RAZORPAY WEBHOOK HANDLER
+  // B. RAZORPAY WEBHOOK HANDLER (caller must verify raw-body HMAC first).
   async handleRazorpayWebhook(payload: any) {
     const event = payload?.event;
-    const eventId = payload?.payload?.payment?.entity?.id || `rzp_evt_${Date.now()}`;
-    this.logger.log(`Received Razorpay Webhook Event: ${event} (ID: ${eventId})`);
-
-    return this.prisma.$transaction(async (tx) => {
-      const alreadyProcessed = await this.isEventAlreadyProcessed(tx, eventId, 'razorpay', event || 'unknown', payload);
-      if (alreadyProcessed) return { received: true, duplicate: true };
-
-      if (event === 'payment.captured' || event === 'order.paid') {
-        const paymentEntity = payload?.payload?.payment?.entity;
-        const notes = paymentEntity?.notes || {};
-        const userId = notes.userId;
-        const tier = (notes.tier as SubscriptionTier) || SubscriptionTier.PRO;
-        const interval = (notes.interval as 'monthly' | 'yearly') || 'monthly';
-
-        if (userId) {
-          await this.activateOrRenewSubscription(tx, {
-            userId,
-            plan: tier,
-            interval,
-            provider: 'razorpay',
-            providerPaymentId: paymentEntity.id,
-            amount: (paymentEntity.amount || 0) / 100 / 83,
-            currency: 'USD',
-            razorpaySubscriptionId: paymentEntity.order_id,
-            metadata: paymentEntity,
-          });
-        }
-      } else if (event === 'subscription.cancelled' || event === 'subscription.halted') {
-        const subEntity = payload?.payload?.subscription?.entity;
-        if (subEntity?.id) {
-          const sub = await tx.subscription.findUnique({
-            where: { razorpaySubscriptionId: subEntity.id },
-          });
-          if (sub) {
-            await tx.subscription.update({
-              where: { id: sub.id },
-              data: { status: event === 'subscription.cancelled' ? 'CANCELED' : 'PAST_DUE' },
-            });
-            if (event === 'subscription.cancelled' && sub.userId) {
-              await tx.user.update({
-                where: { id: sub.userId },
-                data: { plan: 'FREE' },
-              });
-            }
-          }
-        }
+    const payment = payload?.payload?.payment?.entity;
+    if (event === 'payment.captured' && payment?.id && payment?.order_id) {
+      const checkout = await this.prisma.razorpayCheckout.findUnique({
+        where: { orderId: payment.order_id },
+      });
+      if (checkout) {
+        // Reconcile via Razorpay API; never trust the webhook's plan, user ID or price.
+        await this.completeRazorpayCheckout(checkout.userId, checkout.orderId, payment.id);
       }
-
-      return { received: true };
-    });
+    }
+    // Subscription cancellation is not inferred from one-time Razorpay order events.
+    return { received: true };
   }
 
   // C. PAYPAL WEBHOOK HANDLER

@@ -1,5 +1,7 @@
 'use client';
 
+import { openRazorpayCheckout } from '@/lib/razorpay-checkout';
+
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/lib/auth-store';
@@ -290,40 +292,15 @@ export default function BillingPage() {
       } else if (data.approvalUrl) {
         window.location.href = data.approvalUrl;
       } else if (data.orderId) {
-        // Razorpay checkout simulation/activation
-        const confirmPay = confirm(
-          `Razorpay Order Created: ${data.orderId}\nAmount: ₹${(data.amount / 100).toFixed(2)}\nProceed with payment verification?`
-        );
-        if (confirmPay) {
-          const verifyRes = await fetch(`${API_V1}/billing/razorpay/verify`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({
-              orderId: data.orderId,
-              paymentId: `pay_${Date.now()}`,
-              signature: 'rzp_verified_sig',
-              tier: selectedPlanForCheckout.tier,
-            }),
-          });
-          const vData = await verifyRes.json();
-          if (verifyRes.ok) {
-            addToast(vData.message || 'Payment verified! Plan activated.', 'success');
-            setSelectedPlanForCheckout(null);
-            await syncProfile();
-            await fetchBillingData();
-          } else {
-            throw new Error(vData.message || 'Payment verification failed');
-          }
-        }
-      } else {
-        addToast(`Subscription upgraded to ${selectedPlanForCheckout.name}!`, 'success');
+        await openRazorpayCheckout(data, API_V1, authToken);
+        addToast('Razorpay payment verified and access activated.', 'success');
         setSelectedPlanForCheckout(null);
         await syncProfile();
         await fetchBillingData();
+      } else {
+        throw new Error('Payment provider did not return a valid checkout');
       }
+
     } catch (err: any) {
       addToast(err.message || 'Checkout could not be completed', 'error');
     } finally {

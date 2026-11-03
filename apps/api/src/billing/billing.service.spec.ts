@@ -1,3 +1,5 @@
+import axios from 'axios';
+import * as crypto from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BillingService } from './billing.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,6 +40,11 @@ describe('BillingService', () => {
         findUnique: jest.fn(),
         create: jest.fn().mockResolvedValue({ id: 'evt_1' }),
       },
+      razorpayCheckout: {
+        create: jest.fn(),
+        findUnique: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       $transaction: jest.fn((callback) => callback(prisma)),
     };
 
@@ -77,9 +84,9 @@ describe('BillingService', () => {
       const providers = service.getEnabledProviders();
       expect(providers).toEqual({
         stripe: true,
-        razorpay: true,
+        razorpay: false,
         paypal: true,
-        providers: ['stripe', 'razorpay', 'paypal'],
+        providers: ['stripe', 'paypal'],
       });
     });
 
@@ -190,70 +197,141 @@ describe('BillingService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    it('should initialize Razorpay order payload correctly', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'test@example.com', name: 'Test' });
-      prisma.subscription.findFirst.mockResolvedValue(null);
-
-      const session: any = await service.createCheckoutSession('user_1', {
-        tier: SubscriptionTier.PRO,
-        provider: BillingProvider.RAZORPAY,
-        interval: 'monthly',
-      });
-
-      expect(session.provider).toBe('razorpay');
-      expect(session.orderId).toBeDefined();
-      expect(session.amount).toBe(Math.round(12 * 100 * 83));
-      expect(session.currency).toBe('INR');
-    });
-
-    it('should initialize PayPal order payload correctly', async () => {
+    it('rejects unverified Razorpay checkout', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'test@example.com' });
       prisma.subscription.findFirst.mockResolvedValue(null);
+      await expect(service.createCheckoutSession('user_1', { tier: SubscriptionTier.PRO, provider: BillingProvider.RAZORPAY })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
 
-      const session: any = await service.createCheckoutSession('user_1', {
-        tier: SubscriptionTier.BUSINESS,
-        provider: BillingProvider.PAYPAL,
-        interval: 'yearly',
-      });
-
-      expect(session.provider).toBe('paypal');
-      expect(session.orderId).toBeDefined();
-      expect(session.amount).toBe(490);
-      expect(session.approvalUrl).toContain('status=approved');
+    it('rejects unverified PayPal checkout', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'test@example.com' });
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      await expect(service.createCheckoutSession('user_1', { tier: SubscriptionTier.PRO, provider: BillingProvider.PAYPAL })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 
   describe('Payment Verification & Activation', () => {
-    it('should atomically verify Razorpay payment and upgrade subscription', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', plan: 'FREE' });
-
-      const result = await service.verifyRazorpayPayment('user_1', {
-        orderId: 'order_123',
-        paymentId: 'pay_123',
-        signature: 'mock_sig',
-        tier: SubscriptionTier.PRO,
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.plan).toBe('PRO');
-      expect(prisma.$transaction).toHaveBeenCalled();
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'user_1' },
-        data: { plan: 'PRO' },
-      });
+    it('rejects unverified Razorpay payment without upgrading a user', async () => {
+      await expect(service.verifyRazorpayPayment('user_1', { orderId: 'order_123', paymentId: 'pay_123', signature: 'invalid', tier: SubscriptionTier.PRO })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('should atomically capture PayPal order and upgrade subscription', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', plan: 'FREE' });
+    it('rejects unverified PayPal capture without upgrading a user', async () => {
+      await expect(service.capturePayPalOrder('user_1', { orderId: 'PAYPAL-1234', tier: SubscriptionTier.BUSINESS })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
 
-      const result = await service.capturePayPalOrder('user_1', {
-        orderId: 'PAYPAL-1234',
-        tier: SubscriptionTier.BUSINESS,
+  describe('Razorpay verified test integration', () => {
+    const keyId = 'rzp_test_validpublicid';
+    const keySecret = 'test_private_secret_for_unit_tests';
+
+    function configureRazorpay() {
+      config.get.mockImplementation((key: string, defaultVal?: any) => {
+        const values: Record<string, string> = {
+          ENABLE_RAZORPAY: 'true',
+          RAZORPAY_KEY_ID: keyId,
+          RAZORPAY_KEY_SECRET: keySecret,
+          RAZORPAY_INR_PRO_MONTHLY_PAISE: '99000',
+        };
+        return values[key] ?? defaultVal;
       });
+      config.getOrThrow = jest.fn((key: string) => config.get(key));
+    }
 
+    afterEach(() => jest.restoreAllMocks());
+
+    it('creates a real provider order with fixed server-side INR pricing', async () => {
+      configureRazorpay();
+      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', name: 'Test', email: 'test@example.com' });
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      const createOrder = jest.spyOn(axios, 'post').mockResolvedValueOnce({
+        data: { id: 'order_verified', amount: 99000, currency: 'INR' },
+      } as any);
+      const session: any = await service.createCheckoutSession('user_1', {
+        tier: SubscriptionTier.PRO, interval: 'monthly', provider: BillingProvider.RAZORPAY,
+      });
+      expect(createOrder).toHaveBeenCalledWith(
+        'https://api.razorpay.com/v1/orders',
+        expect.objectContaining({ amount: 99000, currency: 'INR' }),
+        expect.objectContaining({ auth: { username: keyId, password: keySecret } }),
+      );
+      expect(prisma.razorpayCheckout.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ orderId: 'order_verified', userId: 'user_1', amountPaise: 99000 }),
+      });
+      expect(session.orderId).toBe('order_verified');
+      expect(session.keyId).toBe(keyId);
+      expect(session).not.toHaveProperty('keySecret');
+    });
+
+    it('activates access only after Razorpay confirms the captured payment', async () => {
+      configureRazorpay();
+      prisma.razorpayCheckout.findUnique.mockResolvedValue({
+        id: 'checkout_1', orderId: 'order_verified', userId: 'user_1',
+        tier: 'PRO', interval: 'monthly', amountPaise: 99000, currency: 'INR', status: 'PENDING',
+      });
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      jest.spyOn(axios, 'get').mockResolvedValueOnce({
+        data: { id: 'pay_verified', order_id: 'order_verified', status: 'captured', captured: true, amount: 99000, currency: 'INR' },
+      } as any);
+      const signature = crypto.createHmac('sha256', keySecret).update('order_verified|pay_verified').digest('hex');
+      const result = await service.verifyRazorpayPayment('user_1', {
+        orderId: 'order_verified', paymentId: 'pay_verified', signature,
+      });
       expect(result.success).toBe(true);
-      expect(result.plan).toBe('BUSINESS');
-      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(prisma.razorpayCheckout.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'checkout_1', status: 'PENDING' } }),
+      );
+      expect(prisma.payment.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: { providerPaymentId: 'pay_verified' },
+        create: expect.objectContaining({ userId: 'user_1', amount: 990, currency: 'INR', provider: 'razorpay' }),
+      }));
+    });
+
+    it('does not activate a payment twice for duplicate callbacks', async () => {
+      configureRazorpay();
+      prisma.razorpayCheckout.findUnique.mockResolvedValue({
+        id: 'checkout_1', orderId: 'order_verified', userId: 'user_1',
+        tier: 'PRO', interval: 'monthly', amountPaise: 99000,
+        currency: 'INR', status: 'PAID', paymentId: 'pay_verified',
+      });
+      const signature = crypto.createHmac('sha256', keySecret).update('order_verified|pay_verified').digest('hex');
+      const result = await service.verifyRazorpayPayment('user_1', {
+        orderId: 'order_verified', paymentId: 'pay_verified', signature,
+      });
+      expect(result.success).toBe(true);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects captured payments with a mismatched amount', async () => {
+      configureRazorpay();
+      prisma.razorpayCheckout.findUnique.mockResolvedValue({
+        id: 'checkout_1', orderId: 'order_verified', userId: 'user_1',
+        tier: 'PRO', interval: 'monthly', amountPaise: 99000, currency: 'INR', status: 'PENDING',
+      });
+      jest.spyOn(axios, 'get').mockResolvedValueOnce({
+        data: { id: 'pay_verified', order_id: 'order_verified', status: 'captured', captured: true, amount: 500, currency: 'INR' },
+      } as any);
+      const signature = crypto.createHmac('sha256', keySecret).update('order_verified|pay_verified').digest('hex');
+      await expect(service.verifyRazorpayPayment('user_1', {
+        orderId: 'order_verified', paymentId: 'pay_verified', signature,
+      })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects checkout verification for a different user', async () => {
+      configureRazorpay();
+      prisma.razorpayCheckout.findUnique.mockResolvedValue({
+        id: 'checkout_1', orderId: 'order_verified', userId: 'owner',
+        tier: 'PRO', interval: 'monthly', amountPaise: 99000, currency: 'INR', status: 'PENDING',
+      });
+      const signature = crypto.createHmac('sha256', keySecret).update('order_verified|pay_verified').digest('hex');
+      await expect(service.verifyRazorpayPayment('attacker', {
+        orderId: 'order_verified', paymentId: 'pay_verified', signature,
+      })).rejects.toThrow(NotFoundException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 

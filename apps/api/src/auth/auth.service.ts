@@ -87,11 +87,16 @@ export class AuthService implements OnModuleInit {
     const adminPassword =
       this.configService.get<string>('ADMIN_PASSWORD') ||
       process.env.ADMIN_PASSWORD ||
-      'AdminPassword123!';
+      undefined;
     const adminName =
       this.configService.get<string>('ADMIN_NAME') ||
       process.env.ADMIN_NAME ||
       'Global System Administrator';
+
+    if (!this.configService.get<string>('ADMIN_EMAIL') || !adminPassword) {
+      this.logger.warn('Admin auto-provisioning disabled: explicit ADMIN_EMAIL and ADMIN_PASSWORD required');
+      return;
+    }
 
     try {
       const existingAdmin = await this.prisma.user.findUnique({
@@ -143,27 +148,7 @@ export class AuthService implements OnModuleInit {
 
         this.logger.log(`Provisioned default enterprise admin account: ${adminEmail} (SUPERADMIN)`);
       } else {
-        let needsUpdate = false;
-        const updateData: any = {};
-        if (existingAdmin.globalRole !== 'SUPERADMIN' && existingAdmin.globalRole !== 'ADMIN') {
-          updateData.globalRole = 'SUPERADMIN';
-          needsUpdate = true;
-        }
-        if (existingAdmin.isBanned) {
-          updateData.isBanned = false;
-          needsUpdate = true;
-        }
-        if (!existingAdmin.isEmailVerified) {
-          updateData.isEmailVerified = true;
-          needsUpdate = true;
-        }
-        if (needsUpdate) {
-          await this.prisma.user.update({
-            where: { id: existingAdmin.id },
-            data: updateData,
-          });
-          this.logger.log(`Upgraded default enterprise admin account: ${adminEmail}`);
-        }
+        this.logger.warn('Admin provisioning skipped: configured email already belongs to an existing user');
       }
     } catch (err: any) {
       this.logger.warn(`Deferred admin account check: ${err?.message || err}`);
@@ -361,8 +346,7 @@ export class AuthService implements OnModuleInit {
 
     // 3. For automated unit testing / CI test token support
     if (
-      process.env.NODE_ENV === 'test' ||
-      idToken.startsWith('test_google_token_')
+      process.env.NODE_ENV === 'test'
     ) {
       try {
         const parts = idToken.split('.');
@@ -587,20 +571,7 @@ export class AuthService implements OnModuleInit {
   async githubAuth(codeOrToken: string) {
     let email = '';
     let name = 'GitHub Developer';
-    try {
-      const parts = codeOrToken.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
-        if (payload.email) email = payload.email.toLowerCase();
-        if (payload.name) name = payload.name;
-      }
-    } catch {
-      // Fallback
-    }
-
-    if (!email) {
-      email = `github_${crypto.randomBytes(4).toString('hex')}@github.com`;
-    }
+    throw new UnauthorizedException('GitHub OAuth is disabled until server-side authorization code exchange and identity verification are implemented');
 
     let user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
@@ -641,30 +612,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async forgotPassword(email: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
-
-    if (!user) {
-      return { success: true, message: 'If that email address is registered, password reset instructions have been sent.' };
-    }
-
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetExpires = new Date(Date.now() + 3600000); // 1 hour
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordResetToken: resetToken,
-        passwordResetExpiresAt: resetExpires,
-      },
-    });
-
-    return {
-      success: true,
-      message: 'If that email address is registered, password reset instructions have been sent.',
-      resetToken, // Provided for test execution & environments
-    };
+    throw new BadRequestException('Password recovery is temporarily unavailable until verified email delivery is configured');
   }
 
   async resetPassword(token: string, newPassword: string) {
@@ -696,7 +644,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async verifyEmail(token: string) {
-    const secret = this.configService.get<string>('JWT_SECRET', 'pdfforge-enterprise-jwt-super-secret-key-2026');
+    const secret = this.configService.getOrThrow<string>('JWT_SECRET');
     let payload: any;
     try {
       payload = await this.jwtService.verifyAsync(token, { secret });
@@ -731,20 +679,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async verify2Fa(userId: string, code: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.twoFactorSecret) {
-      throw new BadRequestException('2FA setup not initiated');
-    }
-
-    if (code.length === 6 && /^\d+$/.test(code)) {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { twoFactorEnabled: true },
-      });
-      return { success: true, message: 'Two-Factor Authentication successfully enabled.' };
-    }
-
-    throw new BadRequestException('Invalid 2FA verification code');
+    throw new BadRequestException('Two-factor authentication enrollment is unavailable until real TOTP verification is implemented');
   }
 
   async createApiKey(userId: string, dto: CreateApiKeyDto) {

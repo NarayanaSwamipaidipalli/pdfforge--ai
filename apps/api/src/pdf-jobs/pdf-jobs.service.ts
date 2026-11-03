@@ -324,24 +324,10 @@ export class PdfJobsService {
       this.logger.warn(
         `Python Worker not reachable at ${this.workerUrl} (simulating async pipeline): ${(err as Error).message}`,
       );
-      // Graceful local development simulation fallback so the system is fully functional out of the box
-      setTimeout(async () => {
-        try {
-          await this.prisma.processingJob.update({
-            where: { id: jobId },
-            data: {
-              status: 'COMPLETED',
-              progress: 100,
-              outputFileKey: `processed/${files[0]?.id || jobId}_result.pdf`,
-              outputFileSizeBytes: BigInt(files[0] ? 1048576 : 524288),
-              durationMs: 1420,
-              completedAt: new Date(),
-            },
-          });
-        } catch {
-          // Ignore
-        }
-      }, 2000);
+      await this.prisma.processingJob.update({
+        where: { id: jobId },
+        data: { status: 'FAILED', errorMessage: 'PDF worker unavailable', completedAt: new Date() },
+      });
     }
   }
 }

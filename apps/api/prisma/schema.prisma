@@ -455,3 +455,22 @@ model WebhookEvent {
   @@index([provider])
   @@map("webhook_events")
 }
+
+
+model RazorpayCheckout {
+  id          String    @id @default(uuid())
+  orderId     String    @unique
+  userId      String
+  tier        String
+  interval    String
+  amountPaise Int
+  currency    String    @default("INR")
+  couponCode  String?
+  paymentId   String?   @unique
+  status      String    @default("PENDING")
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([userId, status])
+  @@map("razorpay_checkouts")
+}
