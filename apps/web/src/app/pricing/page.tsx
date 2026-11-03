@@ -1,3 +1,4 @@
+import { openRazorpayCheckout } from '@/lib/razorpay-checkout';
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -180,6 +181,10 @@ export default function PricingPage() {
       token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
 
     try {
+      if (!authToken) {
+        router.push('/login?redirect=/pricing');
+        return;
+      }
       const res = await fetch(`${API_V1}/billing/checkout`, {
         method: 'POST',
         headers: {
@@ -195,33 +200,20 @@ export default function PricingPage() {
       });
 
       const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Checkout failed');
 
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       } else if (data.approvalUrl) {
         window.location.href = data.approvalUrl;
       } else if (data.orderId) {
-        // Razorpay checkout modal simulation
-        const confirmPay = confirm(`Razorpay Order Created: ${data.orderId}\nAmount: ₹${(data.amount / 100).toFixed(2)}\nProceed with payment simulation?`);
-        if (confirmPay) {
-          const verifyRes = await fetch(`${API_V1}/billing/razorpay/verify`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({
-              orderId: data.orderId,
-              paymentId: `pay_${Date.now()}`,
-              signature: 'rzp_verified_sig',
-              tier: selectedPlan.tier,
-            }),
-          });
-          const vData = await verifyRes.json();
-          alert(vData.message || 'Payment verified! Plan activated.');
-          router.push('/dashboard?upgrade=success');
-        }
+        await openRazorpayCheckout(data, API_V1, authToken as string);
+        setSelectedPlan(null);
+        router.push('/dashboard?upgrade=success');
+      } else {
+        throw new Error('Payment provider did not return a valid checkout');
       }
+
     } catch (err: any) {
       alert(`Checkout failed: ${err.message}`);
     } finally {
