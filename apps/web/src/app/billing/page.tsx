@@ -1,4 +1,5 @@
 'use client';
+import { completeRazorpayCheckout } from '@/lib/razorpay-checkout';
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
@@ -27,7 +28,7 @@ import {
 } from 'lucide-react';
 
 // Normalize API URL to prevent double '/api/v1' or missing '/api/v1'
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const rawApiUrl = '/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 const API_V1 = `${API_BASE}/api/v1`;
 
@@ -290,34 +291,11 @@ export default function BillingPage() {
       } else if (data.approvalUrl) {
         window.location.href = data.approvalUrl;
       } else if (data.orderId) {
-        // Razorpay checkout simulation/activation
-        const confirmPay = confirm(
-          `Razorpay Order Created: ${data.orderId}\nAmount: ₹${(data.amount / 100).toFixed(2)}\nProceed with payment verification?`
-        );
-        if (confirmPay) {
-          const verifyRes = await fetch(`${API_V1}/billing/razorpay/verify`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({
-              orderId: data.orderId,
-              paymentId: `pay_${Date.now()}`,
-              signature: 'rzp_verified_sig',
-              tier: selectedPlanForCheckout.tier,
-            }),
-          });
-          const vData = await verifyRes.json();
-          if (verifyRes.ok) {
-            addToast(vData.message || 'Payment verified! Plan activated.', 'success');
-            setSelectedPlanForCheckout(null);
-            await syncProfile();
-            await fetchBillingData();
-          } else {
-            throw new Error(vData.message || 'Payment verification failed');
-          }
-        }
+        const result = await completeRazorpayCheckout(data, authToken);
+        addToast(result.message || 'Payment verified.', 'success');
+        setSelectedPlanForCheckout(null);
+        await syncProfile();
+        await fetchBillingData();
       } else {
         addToast(`Subscription upgraded to ${selectedPlanForCheckout.name}!`, 'success');
         setSelectedPlanForCheckout(null);

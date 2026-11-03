@@ -17,7 +17,7 @@ import {
   Lock,
 } from 'lucide-react';
 
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const rawApiUrl = '/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 const API_V1 = `${API_BASE}/api/v1`;
 
@@ -44,11 +44,15 @@ function RegisterForm() {
     let isMounted = true;
     const initGoogleGsi = async () => {
       try {
-        const res = await fetch(`${API_V1}/auth/google/url`);
+        const res = await fetch(`${API_V1}/auth/google/url`, { credentials: 'include' });
         if (!res.ok) return;
         const data = await res.json();
         const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || data.clientId;
-        if (!clientId || typeof window === 'undefined' || !isMounted) return;
+        const isRealClientId =
+          clientId &&
+          clientId.includes('.apps.googleusercontent.com') &&
+          !clientId.startsWith('pdfforge-google-client-id');
+        if (!isRealClientId || typeof window === 'undefined' || !isMounted) return;
 
         if (!document.getElementById('google-gsi-script')) {
           const script = document.createElement('script');
@@ -172,7 +176,7 @@ function RegisterForm() {
     setError(null);
     try {
       const callbackTarget = `${window.location.origin}/auth/callback`;
-      const res = await fetch(`${API_V1}/auth/google/url?redirect_uri=${encodeURIComponent(callbackTarget)}`);
+      const res = await fetch(`${API_V1}/auth/google/url?redirect_uri=${encodeURIComponent(callbackTarget)}`, { credentials: 'include' });
       const data = await res.json();
 
       if (data.url) {

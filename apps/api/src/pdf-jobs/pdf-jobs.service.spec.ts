@@ -4,6 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { FilesService } from '../files/files.service';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException } from '@nestjs/common';
+import axios from 'axios';
+
+jest.mock('axios');
 
 describe('PdfJobsService', () => {
   let service: PdfJobsService;
@@ -18,6 +21,7 @@ describe('PdfJobsService', () => {
       user: {
         findUnique: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
       },
       processingJob: {
         create: jest.fn(),
@@ -58,7 +62,20 @@ describe('PdfJobsService', () => {
       service.createJob({
         tool: 'merge',
         fileIds: ['non_existent_id'],
-      }),
+      }, 'synthetic-owner'),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('marks unavailable worker jobs failed without fabricating output', async () => {
+    prismaService.processingJob.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    (axios.post as jest.Mock).mockRejectedValueOnce(new Error('Unavailable fixture'));
+    await (service as any).dispatchToWorker('fixture-job', 'word_to_pdf', [], {});
+    expect(prismaService.processingJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'FAILED' }),
+    }));
+    for (const [call] of prismaService.processingJob.update.mock.calls) {
+      expect(call.data.status).not.toBe('COMPLETED');
+      expect(call.data.outputFileKey).toBeUndefined();
+    }
   });
 });

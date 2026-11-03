@@ -21,8 +21,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-const rawApi = process.env.NEXT_PUBLIC_API_URL || '';
-const API_BASE = (rawApi ? rawApi.replace(/\/api\/v1\/?$/, '') : '') || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:4000');
+const API_BASE = '';
 
 interface ChatMessage {
   id: string;

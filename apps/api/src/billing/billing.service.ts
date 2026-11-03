@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
   ConflictException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -18,10 +19,11 @@ import {
   ApplyCouponDto,
   CreateCouponDto,
 } from './dto/billing.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, PlanTier } from '@prisma/client';
 import Stripe from 'stripe';
 import axios from 'axios';
 import * as crypto from 'crypto';
+import { effectivePlan } from '../common/effective-plan';
 
 @Injectable()
 export class BillingService {
@@ -33,12 +35,9 @@ export class BillingService {
     private readonly configService: ConfigService,
   ) {
     const stripeKey = this.configService.get<string>('STRIPE_SECRET_KEY');
-    if (stripeKey && stripeKey !== 'mock_key' && !stripeKey.startsWith('CHANGEME')) {
+    if (this.configured(stripeKey)) {
       this.stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' });
     }
-    this.ensureDefaultCoupons().catch((err) =>
-      this.logger.warn(`Coupons initialization warning: ${err.message}`),
-    );
   }
 
   // ============================================================================
@@ -46,18 +45,22 @@ export class BillingService {
   // ============================================================================
 
   isStripeEnabled(): boolean {
-    const flag = this.configService.get<string>('ENABLE_STRIPE', 'true');
-    return flag !== 'false';
+    return this.configService.get<string>('ENABLE_STRIPE') === 'true' && !!this.stripe &&
+      this.configured(this.configService.get<string>('STRIPE_WEBHOOK_SECRET'));
   }
 
   isRazorpayEnabled(): boolean {
-    const flag = this.configService.get<string>('ENABLE_RAZORPAY', 'true');
-    return flag !== 'false';
+    return this.configService.get<string>('ENABLE_RAZORPAY') === 'true' &&
+      ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET'].every(
+        (key) => this.configured(this.configService.get<string>(key)),
+      );
   }
 
   isPayPalEnabled(): boolean {
-    const flag = this.configService.get<string>('ENABLE_PAYPAL', 'true');
-    return flag !== 'false';
+    return this.configService.get<string>('ENABLE_PAYPAL') === 'true' &&
+      ['PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET', 'PAYPAL_WEBHOOK_ID'].every(
+        (key) => this.configured(this.configService.get<string>(key)),
+      );
   }
 
   getEnabledProviders() {
@@ -82,50 +85,27 @@ export class BillingService {
 
   verifyStripeWebhook(rawBody?: Buffer, signature?: string): Stripe.Event {
     const secret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET');
-    if (!secret || secret.startsWith('whsec_test') || !this.stripe) {
-      if (!rawBody) throw new UnauthorizedException('Missing webhook payload');
-      try {
-        return JSON.parse(rawBody.toString('utf8'));
-      } catch {
-        throw new UnauthorizedException('Invalid JSON webhook body');
-      }
-    }
-    if (!rawBody || !signature) {
+    if (!this.isStripeEnabled() || !Buffer.isBuffer(rawBody) || !rawBody.length || !signature || !secret) {
       throw new UnauthorizedException('Invalid Stripe webhook request or unconfigured secret');
     }
     try {
       return this.stripe.webhooks.constructEvent(rawBody, signature, secret);
     } catch (err) {
-      this.logger.error(`Stripe signature validation failed: ${(err as Error).message}`);
       throw new UnauthorizedException('Invalid Stripe webhook signature');
     }
   }
 
   verifyRazorpayWebhook(rawBody?: Buffer, signature?: string): void {
     const secret = this.configService.get<string>('RAZORPAY_WEBHOOK_SECRET');
-    if (!secret || secret.startsWith('rzp_test')) {
-      return; // Skip signature check in dev/test when secret is not configured
-    }
-    if (!rawBody || !signature) {
+    if (!this.isRazorpayEnabled() || !Buffer.isBuffer(rawBody) || !rawBody.length || !secret) {
       throw new UnauthorizedException('Invalid Razorpay webhook request or unconfigured secret');
     }
-    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    const expectedBuffer = Buffer.from(expected, 'utf8');
-    const signatureBuffer = Buffer.from(signature, 'utf8');
-    if (
-      expectedBuffer.length !== signatureBuffer.length ||
-      !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)
-    ) {
-      throw new UnauthorizedException('Invalid Razorpay webhook signature');
-    }
+    this.verifyHmac(rawBody, signature, secret);
   }
 
   async verifyPayPalWebhook(rawBody?: Buffer, headers: Record<string, string> = {}): Promise<void> {
     const webhookId = this.configService.get<string>('PAYPAL_WEBHOOK_ID');
-    if (!webhookId || webhookId.startsWith('mock_')) {
-      return; // Skip verification in dev/test
-    }
-    if (!rawBody) {
+    if (!this.isPayPalEnabled() || !webhookId || !Buffer.isBuffer(rawBody) || !rawBody.length) {
       throw new UnauthorizedException('Invalid PayPal webhook request');
     }
     const transmissionId = headers['paypal-transmission-id'];
@@ -135,56 +115,21 @@ export class BillingService {
     if (!transmissionId || !transmissionTime || !transmissionSig || !certUrl) {
       throw new UnauthorizedException('Missing required PayPal signature headers');
     }
-    if (!/^https:\/\/api\.paypal\.com\/|^https:\/\/api\.sandbox\.paypal\.com\//.test(certUrl)) {
-      throw new UnauthorizedException('Untrusted PayPal certificate domain');
-    }
-    const certResponse = await axios.get(certUrl, { timeout: 5000 });
-    const cert = certResponse.data as string;
-    let crcValue = 0xffffffff;
-    for (const byte of rawBody) {
-      crcValue ^= byte;
-      for (let bit = 0; bit < 8; bit++) {
-        crcValue = (crcValue >>> 1) ^ ((crcValue & 1) ? 0xedb88320 : 0);
-      }
-    }
-    const crc = ((crcValue ^ 0xffffffff) >>> 0).toString();
-    const signedPayload = `${transmissionId}|${transmissionTime}|${webhookId}|${crc}`;
-    const valid = crypto.verify('RSA-SHA256', Buffer.from(signedPayload), cert, Buffer.from(transmissionSig, 'base64'));
-    if (!valid) throw new UnauthorizedException('Invalid PayPal webhook signature');
+    // Send to PayPal's fixed API endpoint. Never fetch caller-controlled certificate URLs.
+    let event: unknown;
+    try { event = JSON.parse(rawBody.toString('utf8')); }
+    catch { throw new UnauthorizedException('Invalid PayPal webhook payload'); }
+    const response = await this.paypalRequest('post', '/v1/notifications/verify-webhook-signature', {
+      transmission_id: transmissionId, transmission_time: transmissionTime,
+      transmission_sig: transmissionSig, cert_url: certUrl,
+      auth_algo: headers['paypal-auth-algo'], webhook_id: webhookId, webhook_event: event,
+    });
+    if (response.verification_status !== 'SUCCESS') throw new UnauthorizedException('Invalid PayPal webhook signature');
   }
 
   // ============================================================================
   // 3. CATALOG, PRICING & COUPONS
   // ============================================================================
-
-  private async ensureDefaultCoupons() {
-    const count = await this.prisma.coupon.count();
-    if (count === 0) {
-      await this.prisma.coupon.createMany({
-        data: [
-          {
-            code: 'WELCOME50',
-            discountPercent: 50,
-            maxUses: 1000,
-            isActive: true,
-          },
-          {
-            code: 'PRO2026',
-            discountPercent: 20,
-            maxUses: 500,
-            isActive: true,
-          },
-          {
-            code: 'ENTERPRISE100',
-            discountAmount: 100,
-            maxUses: 100,
-            isActive: true,
-          },
-        ],
-      });
-      this.logger.log('Seeded default promotional coupons (WELCOME50, PRO2026, ENTERPRISE100)');
-    }
-  }
 
   getPlansCatalog() {
     return [
@@ -343,758 +288,464 @@ export class BillingService {
   // 4. CHECKOUT SESSION CREATION
   // ============================================================================
 
+  private configured(value?: string): boolean {
+    return typeof value === 'string' && value.trim().length > 0 &&
+      !/^(mock|changeme|placeholder|replace|example|your[_-])/i.test(value.trim());
+  }
+
+  private verifyHmac(body: Buffer | string, signature: string | undefined, secret: string): void {
+    if (typeof signature !== 'string' || !/^[a-fA-F0-9]{64}$/.test(signature)) {
+      throw new UnauthorizedException('Invalid payment signature');
+    }
+    const expected = crypto.createHmac('sha256', secret).update(body).digest();
+    if (!crypto.timingSafeEqual(expected, Buffer.from(signature, 'hex'))) {
+      throw new UnauthorizedException('Invalid payment signature');
+    }
+  }
+
+  private identifier(value: unknown, label: string): string {
+    if (typeof value !== 'string' || !/^[a-zA-Z0-9_.:-]{1,200}$/.test(value)) {
+      throw new BadRequestException(`Missing or invalid ${label}`);
+    }
+    return value;
+  }
+
+  private timestamp(value: unknown, allowFuture = false): Date {
+    if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+      throw new BadRequestException('Missing provider event timestamp');
+    }
+    const result = new Date((value as number) * 1000);
+    if (!Number.isFinite(result.getTime()) || (!allowFuture && result.getTime() > Date.now() + 300000)) {
+      throw new BadRequestException('Invalid provider event timestamp');
+    }
+    return result;
+  }
+
+  private calendarEnd(start: Date, interval: string): Date {
+    const result = new Date(start);
+    const day = result.getUTCDate();
+    result.setUTCDate(1);
+    result.setUTCMonth(result.getUTCMonth() + (interval === 'yearly' ? 12 : 1));
+    const lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
+    result.setUTCDate(Math.min(day, lastDay));
+    return result;
+  }
+
+  private stripeState(status: string): 'ACTIVE' | 'PAST_DUE' | 'CANCELED' {
+    if (['active', 'trialing'].includes(status)) return 'ACTIVE';
+    if (['canceled', 'incomplete_expired'].includes(status)) return 'CANCELED';
+    if (['past_due', 'unpaid', 'paused', 'incomplete'].includes(status)) return 'PAST_DUE';
+    throw new BadRequestException('Invalid provider subscription status');
+  }
+
+  private async atomic<T>(action: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        return await this.prisma.$transaction(action, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 10000, timeout: 15000,
+        });
+      } catch (error) {
+        // Retry the whole transaction after a conflicting event/payment wins. Side effects roll back.
+        if (!['P2034', 'P2002'].includes((error as any)?.code) || attempt === 3) throw error;
+      }
+    }
+    throw new ConflictException('Concurrent billing update; retry the request');
+  }
+
+  private async razorpayRequest(method: 'get' | 'post', path: string, data?: unknown): Promise<any> {
+    if (!this.isRazorpayEnabled()) throw new ServiceUnavailableException('Razorpay is not configured');
+    try {
+      const response = await axios.request({
+        method, url: `https://api.razorpay.com/v1${path}`, data,
+        auth: {
+          username: this.configService.get<string>('RAZORPAY_KEY_ID'),
+          password: this.configService.get<string>('RAZORPAY_KEY_SECRET'),
+        },
+        timeout: 10000, maxRedirects: 0,
+      });
+      return response.data;
+    } catch {
+      throw new ServiceUnavailableException('Razorpay request failed');
+    }
+  }
+
+  private async paypalRequest(method: 'get' | 'post', path: string, data?: unknown, requestId?: string): Promise<any> {
+    if (!this.isPayPalEnabled()) throw new ServiceUnavailableException('PayPal is not configured');
+    const mode = this.configService.get<string>('PAYPAL_MODE', 'sandbox');
+    if (!['live', 'sandbox'].includes(mode)) throw new ServiceUnavailableException('Invalid PayPal environment');
+    const origin = mode === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+    try {
+      const token = await axios.post(`${origin}/v1/oauth2/token`, 'grant_type=client_credentials', {
+        auth: {
+          username: this.configService.get<string>('PAYPAL_CLIENT_ID'),
+          password: this.configService.get<string>('PAYPAL_CLIENT_SECRET'),
+        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 10000, maxRedirects: 0,
+      });
+      if (!token.data?.access_token) throw new Error('Missing access token');
+      const response = await axios.request({
+        method, url: `${origin}${path}`, data,
+        headers: {
+          Authorization: `Bearer ${token.data.access_token}`, 'Content-Type': 'application/json',
+          ...(requestId ? { 'PayPal-Request-Id': requestId } : {}),
+        },
+        timeout: 10000, maxRedirects: 0,
+      });
+      return response.data;
+    } catch {
+      throw new ServiceUnavailableException('PayPal request failed');
+    }
+  }
+
   async createCheckoutSession(userId: string, dto: CreateCheckoutSessionDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    const targetTier = dto.tier || dto.plan || SubscriptionTier.PRO;
+    if (!user || user.isBanned) throw new NotFoundException('User not found');
+    const tier = dto.tier || dto.plan;
     const interval = dto.interval || dto.billingInterval || 'monthly';
     const provider = dto.provider || BillingProvider.STRIPE;
-
-    // Validate provider enabled status
-    if (provider === BillingProvider.STRIPE && !this.isStripeEnabled()) {
-      throw new BadRequestException('Stripe payment provider is currently disabled');
+    if (!tier || !Object.values(SubscriptionTier).includes(tier) || !['monthly', 'yearly'].includes(interval)) {
+      throw new BadRequestException('An explicit valid plan and billing interval are required');
     }
-    if (provider === BillingProvider.RAZORPAY && !this.isRazorpayEnabled()) {
-      throw new BadRequestException('Razorpay payment provider is currently disabled');
+    if (dto.orgId) throw new BadRequestException('Organization checkout requires a separately authorized billing flow');
+    if (tier === SubscriptionTier.FREE) return this.handleDowngradeToFree(userId);
+    if (!(provider === 'stripe' ? this.isStripeEnabled() : provider === 'razorpay' ? this.isRazorpayEnabled() : provider === 'paypal' && this.isPayPalEnabled())) {
+      throw new ServiceUnavailableException('Payment provider is not configured');
     }
-    if (provider === BillingProvider.PAYPAL && !this.isPayPalEnabled()) {
-      throw new BadRequestException('PayPal payment provider is currently disabled');
-    }
-
-    // Check for duplicate identical subscription
-    const existingSub = await this.prisma.subscription.findFirst({
-      where: {
-        userId,
-        status: 'ACTIVE',
-      },
+    const existing = await this.prisma.subscription.findFirst({
+      where: { userId, status: 'ACTIVE', plan: tier, interval, currentPeriodEnd: { gt: new Date() }, cancelAtPeriodEnd: false },
     });
+    if (existing) throw new ConflictException('This plan and interval are already active');
 
-    if (existingSub && existingSub.plan === targetTier && existingSub.interval === interval && !existingSub.cancelAtPeriodEnd) {
-      throw new ConflictException(
-        `You already have an active subscription for the ${targetTier} plan (${interval}). You can manage it from your billing settings.`,
-      );
-    }
-
-    // Free tier downgrade handling
-    if (targetTier === SubscriptionTier.FREE) {
-      return this.handleDowngradeToFree(userId);
-    }
-
-    const origin = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
-    let baseAmount = this.getTierBaseAmount(targetTier, interval);
-    let appliedCoupon: string | undefined = undefined;
-
-    if (dto.couponCode) {
-      try {
-        const couponRes = await this.applyCoupon({
-          code: dto.couponCode,
-          tier: targetTier,
-          interval,
-        });
-        baseAmount = couponRes.finalAmount;
-        appliedCoupon = couponRes.code;
-      } catch {
-        // Fallback to non-discounted base amount
+    let amountMinor: number;
+    let currency = 'USD';
+    let couponCode: string | undefined;
+    if (provider === 'razorpay') {
+      // Explicit paise prices; never convert USD using an approximate exchange rate.
+      const price = this.configService.get<string>(`RAZORPAY_PRICE_${tier}_${interval.toUpperCase()}`);
+      if (!price || !/^\d+$/.test(price) || !Number.isSafeInteger(Number(price)) || Number(price) <= 0 || Number(price) > 2147483647) {
+        throw new ServiceUnavailableException('Razorpay INR price is not configured for this plan');
       }
-    }
-
-    // 1. RAZORPAY CHECKOUT
-    if (provider === BillingProvider.RAZORPAY) {
-      const orderId = `order_rzp_${crypto.randomBytes(8).toString('hex')}`;
-      const amountPaise = Math.round(baseAmount * 100 * 83); // USD to INR conversion approximate
-      const keyId = this.configService.get<string>('RAZORPAY_KEY_ID', 'rzp_test_mock_enterprise');
-
-      return {
-        provider: 'razorpay',
-        orderId,
-        amount: amountPaise,
-        currency: 'INR',
-        keyId,
-        tier: targetTier,
-        interval,
-        couponCode: appliedCoupon,
-        user: { name: user.name || 'PDFForge Member', email: user.email },
-      };
-    }
-
-    // 2. PAYPAL CHECKOUT
-    if (provider === BillingProvider.PAYPAL) {
-      const orderId = `PAYPAL-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-      return {
-        provider: 'paypal',
-        orderId,
-        amount: baseAmount,
-        currency: 'USD',
-        tier: targetTier,
-        interval,
-        couponCode: appliedCoupon,
-        approvalUrl: `${origin}/dashboard?provider=paypal&orderId=${orderId}&tier=${targetTier}&interval=${interval}&status=approved`,
-      };
-    }
-
-    // 3. STRIPE CHECKOUT
-    if (this.stripe) {
-      try {
-        const session = await this.stripe.checkout.sessions.create({
-          payment_method_types: ['card'],
-          mode: 'subscription',
-          customer_email: user.email,
-          line_items: [
-            {
-              price_data: {
-                currency: 'usd',
-                product_data: {
-                  name: `PDFForge AI ${targetTier} Plan`,
-                  description: `Access to PDFForge AI Enterprise features (${interval})`,
-                },
-                unit_amount: Math.round(baseAmount * 100),
-                recurring: {
-                  interval: interval === 'yearly' ? 'year' : 'month',
-                },
-              },
-              quantity: 1,
-            },
-          ],
-          success_url: `${origin}/dashboard?session_id={CHECKOUT_SESSION_ID}&upgrade=success&tier=${targetTier}&interval=${interval}`,
-          cancel_url: `${origin}/pricing?canceled=true`,
-          metadata: {
-            userId: user.id,
-            tier: targetTier,
-            interval,
-            couponCode: appliedCoupon || '',
-            orgId: dto.orgId || '',
-          },
-        });
-
-        return {
-          provider: 'stripe',
-          sessionId: session.id,
-          checkoutUrl: session.url,
-          tier: targetTier,
-          interval,
-        };
-      } catch (err) {
-        this.logger.error(`Stripe checkout creation error: ${(err as Error).message}`);
+      amountMinor = Number(price);
+      currency = 'INR';
+      if (dto.couponCode) throw new BadRequestException('USD coupons cannot be applied to INR orders');
+    } else {
+      let amount = this.getTierBaseAmount(tier, interval);
+      if (dto.couponCode) {
+        const coupon = await this.applyCoupon({ code: dto.couponCode, tier, interval });
+        if (coupon.currency !== 'USD') throw new BadRequestException('Coupon currency does not match checkout');
+        amount = coupon.finalAmount;
+        couponCode = coupon.code;
       }
+      amountMinor = Math.round(amount * 100);
+      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new BadRequestException('A positive purchase amount is required');
     }
+    const order = await this.prisma.billingOrder.create({
+      data: { userId, provider, plan: tier, interval, amountMinor, currency, couponCode },
+    });
+    const origin = this.configService.get<string>('FRONTEND_URL');
+    if (!origin || !/^https?:\/\//.test(origin)) throw new ServiceUnavailableException('Frontend URL is not configured');
 
-    // Sandbox simulated checkout for development / CI environments
-    return {
-      provider: 'stripe',
-      sessionId: `cs_test_${crypto.randomBytes(8).toString('hex')}`,
-      checkoutUrl: `${origin}/dashboard?upgrade=success&tier=${targetTier}&interval=${interval}&provider=stripe`,
-      tier: targetTier,
-      interval,
-    };
+    if (provider === 'razorpay') {
+      const remote = await this.razorpayRequest('post', '/orders', {
+        amount: amountMinor, currency, receipt: order.id,
+        notes: { billingOrderId: order.id },
+      });
+      this.identifier(remote?.id, 'Razorpay order ID');
+      if (remote.amount !== amountMinor || remote.currency !== currency) throw new BadRequestException('Provider order amount does not match');
+      await this.prisma.billingOrder.update({ where: { id: order.id }, data: { providerOrderId: remote.id } });
+      return { provider, orderId: remote.id, amount: amountMinor, currency,
+        keyId: this.configService.get<string>('RAZORPAY_KEY_ID'), tier, interval,
+        user: { name: user.name || 'PDFForge Member', email: user.email } };
+    }
+    if (provider === 'paypal') {
+      const remote = await this.paypalRequest('post', '/v2/checkout/orders', {
+        intent: 'CAPTURE', purchase_units: [{ reference_id: order.id, custom_id: order.id,
+          amount: { currency_code: currency, value: (amountMinor / 100).toFixed(2) } }],
+        application_context: { return_url: `${origin}/billing?provider=paypal`, cancel_url: `${origin}/pricing?canceled=true` },
+      }, order.id);
+      this.identifier(remote?.id, 'PayPal order ID');
+      const approvalUrl = remote.links?.find((link: any) => link.rel === 'approve')?.href;
+      if (typeof approvalUrl !== 'string' || !/^https:\/\/(www\.)?(sandbox\.)?paypal\.com\//.test(approvalUrl)) {
+        throw new BadRequestException('Missing provider approval URL');
+      }
+      await this.prisma.billingOrder.update({ where: { id: order.id }, data: { providerOrderId: remote.id } });
+      return { provider, orderId: remote.id, amount: amountMinor / 100, currency, tier, interval, approvalUrl };
+    }
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await this.stripe.checkout.sessions.create({
+        mode: 'subscription', payment_method_types: ['card'], customer_email: user.email,
+        line_items: [{ price_data: { currency: 'usd', product_data: { name: `PDFForge AI ${tier}` },
+          unit_amount: amountMinor, recurring: { interval: interval === 'yearly' ? 'year' : 'month' } }, quantity: 1 }],
+        success_url: `${origin}/billing?session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${origin}/pricing?canceled=true`,
+        metadata: { billingOrderId: order.id }, subscription_data: { metadata: { billingOrderId: order.id } },
+      }, { idempotencyKey: order.id });
+    } catch { throw new ServiceUnavailableException('Stripe checkout request failed'); }
+    await this.prisma.billingOrder.update({ where: { id: order.id }, data: { providerOrderId: session.id } });
+    return { provider, sessionId: session.id, checkoutUrl: session.url, tier, interval };
   }
 
   private async handleDowngradeToFree(userId: string) {
-    const activeSub = await this.prisma.subscription.findFirst({
-      where: { userId, status: 'ACTIVE' },
-    });
-
-    if (activeSub) {
-      await this.prisma.subscription.update({
-        where: { id: activeSub.id },
-        data: {
-          cancelAtPeriodEnd: true,
-          canceledAt: new Date(),
-        },
-      });
-      return {
-        message: 'Your plan will be downgraded to Free at the end of your current billing period.',
-        currentPeriodEnd: activeSub.currentPeriodEnd,
-      };
-    }
-
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { plan: 'FREE' },
-    });
-
-    return {
-      message: 'Account updated to Free tier.',
-      plan: 'FREE',
-    };
+    const active = await this.prisma.subscription.findFirst({ where: { userId, status: 'ACTIVE' } });
+    if (active) return this.cancelSubscription(userId);
+    await this.prisma.user.update({ where: { id: userId }, data: { plan: 'FREE' } });
+    return { message: 'Account updated to Free tier.', plan: 'FREE' };
   }
 
-  // ============================================================================
-  // 5. ATOMIC SUBSCRIPTION ACTIVATION / RENEWAL
-  // ============================================================================
+  private async refreshEntitlement(tx: Prisma.TransactionClient, userId: string) {
+    const plan = await effectivePlan(tx, { id: userId, plan: 'FREE' });
+    await tx.user.update({ where: { id: userId }, data: { plan } });
+  }
 
-  async activateOrRenewSubscription(
-    tx: Prisma.TransactionClient,
-    params: {
-      userId: string;
-      plan: SubscriptionTier;
-      interval?: 'monthly' | 'yearly';
-      provider: 'stripe' | 'razorpay' | 'paypal';
-      providerPaymentId: string;
-      amount: number;
-      currency?: string;
-      stripeCustomerId?: string;
-      stripeSubscriptionId?: string;
-      razorpaySubscriptionId?: string;
-      paypalSubscriptionId?: string;
-      metadata?: any;
-      couponCode?: string;
-    },
-  ) {
-    const interval = params.interval || 'monthly';
-    const periodDurationMs = (interval === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000;
+  private async findOrder(tx: Prisma.TransactionClient | PrismaService, provider: string, providerOrderId: string) {
+    const order = await tx.billingOrder.findUnique({ where: { provider_providerOrderId: { provider, providerOrderId } } });
+    if (!order) throw new NotFoundException('No trusted checkout order matches this payment');
+    return order;
+  }
+
+  private async existingPayment(tx: Prisma.TransactionClient, provider: string, paymentId: string) {
+    return tx.payment.findFirst({ where: { provider, providerPaymentId: { in: [paymentId, `${provider}:${paymentId}`] } } });
+  }
+
+  private async settleOrder(tx: Prisma.TransactionClient, provider: string, providerOrderId: string,
+    paymentId: string, amountMinor: number, currency: string,
+    options: { subscriptionId?: string; customerId?: string; start?: Date; end?: Date; eventAt?: Date; userId?: string;
+      status?: 'ACTIVE' | 'PAST_DUE' | 'CANCELED' } = {}) {
+    this.identifier(paymentId, 'payment ID');
+    const order = await this.findOrder(tx, provider, providerOrderId);
+    if (options.userId && order.userId !== options.userId) throw new UnauthorizedException('Payment order belongs to another user');
+    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0 || order.amountMinor !== amountMinor || order.currency !== currency) {
+      throw new BadRequestException('Captured payment does not match trusted order amount and currency');
+    }
+    if (order.status === 'PAID') {
+      if (order.providerPaymentId !== paymentId) throw new ConflictException('Order was paid by a different payment');
+      return { success: true, duplicate: true, plan: order.plan, interval: order.interval };
+    }
+    if (order.status !== 'CREATED') throw new BadRequestException('Checkout order is not payable');
+    if (await this.existingPayment(tx, provider, paymentId)) throw new ConflictException('Payment is already bound to another order');
+    const user = await tx.user.findUnique({ where: { id: order.userId } });
+    if (!user || user.isBanned) throw new UnauthorizedException('Account is unavailable');
+    const remoteField = provider === 'stripe' ? 'stripeSubscriptionId' : provider === 'razorpay' ? 'razorpaySubscriptionId' : 'paypalSubscriptionId';
+    const existing = await tx.subscription.findFirst({ where: {
+      userId: order.userId, provider, plan: order.plan, interval: order.interval, status: 'ACTIVE',
+      [remoteField]: options.subscriptionId || null,
+    }, orderBy: { createdAt: 'desc' } });
     const now = new Date();
-    const currentPeriodEnd = new Date(now.getTime() + periodDurationMs);
-
-    // 1. Update user tier
-    await tx.user.update({
-      where: { id: params.userId },
-      data: { plan: params.plan },
-    });
-
-    // 2. Find any currently active subscription
-    const existingActive = await tx.subscription.findFirst({
-      where: {
-        userId: params.userId,
-        status: { in: ['ACTIVE', 'TRIALING', 'PAST_DUE'] },
-      },
-    });
-
-    let subscriptionRecordId: string;
-
-    if (existingActive) {
-      const updatedSub = await tx.subscription.update({
-        where: { id: existingActive.id },
-        data: {
-          plan: params.plan,
-          status: 'ACTIVE',
-          provider: params.provider,
-          interval,
-          stripeCustomerId: params.stripeCustomerId || existingActive.stripeCustomerId,
-          stripeSubscriptionId: params.stripeSubscriptionId || existingActive.stripeSubscriptionId,
-          razorpaySubscriptionId: params.razorpaySubscriptionId || existingActive.razorpaySubscriptionId,
-          paypalSubscriptionId: params.paypalSubscriptionId || existingActive.paypalSubscriptionId,
-          currentPeriodStart: now,
-          currentPeriodEnd,
-          cancelAtPeriodEnd: false,
-          canceledAt: null,
-        },
-      });
-      subscriptionRecordId = updatedSub.id;
-    } else {
-      const newSub = await tx.subscription.create({
-        data: {
-          userId: params.userId,
-          plan: params.plan,
-          status: 'ACTIVE',
-          provider: params.provider,
-          interval,
-          stripeCustomerId: params.stripeCustomerId,
-          stripeSubscriptionId: params.stripeSubscriptionId,
-          razorpaySubscriptionId: params.razorpaySubscriptionId,
-          paypalSubscriptionId: params.paypalSubscriptionId,
-          currentPeriodStart: now,
-          currentPeriodEnd,
-        },
-      });
-      subscriptionRecordId = newSub.id;
-    }
-
-    // 3. Upsert Payment transaction record
-    await tx.payment.upsert({
-      where: { providerPaymentId: params.providerPaymentId },
-      update: {
-        status: 'COMPLETED',
-        amount: params.amount,
-        currency: params.currency || 'USD',
-        metadata: params.metadata || {},
-      },
-      create: {
-        userId: params.userId,
-        subscriptionId: subscriptionRecordId,
-        provider: params.provider,
-        providerPaymentId: params.providerPaymentId,
-        amount: params.amount,
-        currency: params.currency || 'USD',
-        status: 'COMPLETED',
-        metadata: params.metadata || {},
-      },
-    });
-
-    // 4. Generate official tax Invoice record
-    const invoiceNumber = `INV-${now.getFullYear()}-${params.userId.slice(0, 4).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
-    await tx.invoice.create({
-      data: {
-        userId: params.userId,
-        invoiceNumber,
-        amount: params.amount,
-        currency: params.currency || 'USD',
-        status: 'PAID',
-      },
-    });
-
-    // 5. Increment coupon usage if used
-    if (params.couponCode) {
-      await tx.coupon.updateMany({
-        where: { code: params.couponCode.trim().toUpperCase() },
-        data: { usedCount: { increment: 1 } },
-      });
-    }
-
-    this.logger.log(
-      `[Billing] User ${params.userId} activated on ${params.plan} (${interval}) via ${params.provider}`,
-    );
-
-    return {
-      success: true,
-      plan: params.plan,
-      interval,
-      currentPeriodEnd,
-    };
+    const renewalBase = existing?.currentPeriodEnd > now ? existing.currentPeriodEnd : now;
+    const start = options.start || (existing?.currentPeriodEnd > now ? existing.currentPeriodStart : now);
+    const end = options.end || this.calendarEnd(renewalBase, order.interval);
+    if (end <= start) throw new BadRequestException('Invalid subscription period');
+    const data = { plan: order.plan, provider, interval: order.interval, status: options.status || 'ACTIVE' as const,
+      currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: false, canceledAt: options.status === 'CANCELED' ? now : null,
+      lastProviderEventAt: options.eventAt || now,
+      ...(options.subscriptionId ? { [remoteField]: options.subscriptionId } : {}),
+      ...(options.customerId ? { stripeCustomerId: options.customerId } : {}) };
+    const sub = existing ? await tx.subscription.update({ where: { id: existing.id }, data }) :
+      await tx.subscription.create({ data: { ...data, userId: order.userId } });
+    await this.recordPayment(tx, order.userId, sub.id, provider, paymentId, amountMinor, currency);
+    await tx.billingOrder.update({ where: { id: order.id }, data: {
+      status: 'PAID', providerPaymentId: paymentId, subscriptionId: sub.id, paidAt: now,
+    } });
+    if (order.couponCode) await tx.coupon.updateMany({ where: { code: order.couponCode }, data: { usedCount: { increment: 1 } } });
+    await this.refreshEntitlement(tx, order.userId);
+    return { success: true, plan: order.plan, interval: order.interval, currentPeriodEnd: end };
   }
 
-  // ============================================================================
-  // 6. RAZORPAY PAYMENT VERIFICATION
-  // ============================================================================
+  private async recordPayment(tx: Prisma.TransactionClient, userId: string, subscriptionId: string,
+    provider: string, paymentId: string, amountMinor: number, currency: string) {
+    await tx.payment.create({ data: { userId, subscriptionId, provider,
+      providerPaymentId: `${provider}:${paymentId}`, amount: amountMinor / 100, currency, status: 'COMPLETED' } });
+    const invoiceNumber = `INV-${crypto.createHash('sha256').update(`${provider}:${paymentId}`).digest('hex').slice(0, 32)}`;
+    await tx.invoice.create({ data: { userId, invoiceNumber, amount: amountMinor / 100, currency, status: 'PAID' } });
+  }
 
   async verifyRazorpayPayment(userId: string, dto: VerifyPaymentDto) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    const keySecret = this.configService.get<string>('RAZORPAY_KEY_SECRET', 'mock_rzp_secret');
-    const expectedSignature = crypto
-      .createHmac('sha256', keySecret)
-      .update(`${dto.orderId}|${dto.paymentId}`)
-      .digest('hex');
-
-    const isValid = dto.signature === expectedSignature || keySecret === 'mock_rzp_secret';
-    if (!isValid) {
-      throw new BadRequestException('Invalid Razorpay cryptographic payment signature');
+    if (!this.isRazorpayEnabled()) throw new ServiceUnavailableException('Razorpay is not configured');
+    this.identifier(dto.orderId, 'order ID'); this.identifier(dto.paymentId, 'payment ID');
+    const order = await this.findOrder(this.prisma, 'razorpay', dto.orderId);
+    if (order.userId !== userId) throw new UnauthorizedException('Payment order belongs to another user');
+    this.verifyHmac(`${order.providerOrderId}|${dto.paymentId}`, dto.signature, this.configService.get<string>('RAZORPAY_KEY_SECRET'));
+    const payment = await this.razorpayRequest('get', `/payments/${encodeURIComponent(dto.paymentId)}`);
+    if (payment.id !== dto.paymentId || payment.order_id !== order.providerOrderId || payment.status !== 'captured' || payment.captured !== true) {
+      throw new BadRequestException('Payment has not been captured for this order');
     }
-
-    const tier = dto.tier || dto.plan || SubscriptionTier.PRO;
-    const interval = dto.interval || 'monthly';
-    const amount = this.getTierBaseAmount(tier, interval);
-
-    await this.prisma.$transaction(async (tx) => {
-      await this.activateOrRenewSubscription(tx, {
-        userId,
-        plan: tier,
-        interval,
-        provider: 'razorpay',
-        providerPaymentId: dto.paymentId,
-        amount,
-        currency: 'USD',
-        razorpaySubscriptionId: dto.orderId,
-        metadata: { orderId: dto.orderId, tier, interval },
-      });
-    });
-
-    return {
-      success: true,
-      message: `Your account has been upgraded to ${tier} (${interval}) with Razorpay!`,
-      plan: tier,
-    };
+    return this.atomic((tx) => this.settleOrder(tx, 'razorpay', order.providerOrderId, payment.id, payment.amount, payment.currency, { userId }));
   }
 
-  // ============================================================================
-  // 7. PAYPAL ORDER CAPTURE
-  // ============================================================================
+  private decimalMinor(value: unknown): number {
+    if (typeof value !== 'string' || !/^\d+\.\d{2}$/.test(value)) throw new BadRequestException('Invalid provider amount');
+    const minor = Number(value.replace('.', ''));
+    if (!Number.isSafeInteger(minor) || minor <= 0) throw new BadRequestException('Invalid provider amount');
+    return minor;
+  }
 
   async capturePayPalOrder(userId: string, dto: CapturePayPalOrderDto) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    const tier = dto.tier || dto.plan || SubscriptionTier.PRO;
-    const interval = dto.interval || 'monthly';
-    const amount = this.getTierBaseAmount(tier, interval);
-
-    await this.prisma.$transaction(async (tx) => {
-      await this.activateOrRenewSubscription(tx, {
-        userId,
-        plan: tier,
-        interval,
-        provider: 'paypal',
-        providerPaymentId: dto.orderId,
-        amount,
-        currency: 'USD',
-        paypalSubscriptionId: dto.orderId,
-        metadata: { orderId: dto.orderId, tier, interval },
-      });
-    });
-
-    return {
-      success: true,
-      message: `Your account has been upgraded to ${tier} (${interval}) with PayPal!`,
-      plan: tier,
-    };
-  }
-
-  // ============================================================================
-  // 8. IDEMPOTENT WEBHOOK EVENT HANDLERS
-  // ============================================================================
-
-  private async isEventAlreadyProcessed(
-    tx: Prisma.TransactionClient,
-    eventId: string,
-    provider: string,
-    eventType: string,
-    payload?: any,
-  ): Promise<boolean> {
-    const existing = await tx.webhookEvent.findUnique({
-      where: { eventId },
-    });
-    if (existing) {
-      return true;
+    this.identifier(dto.orderId, 'PayPal order ID');
+    const order = await this.findOrder(this.prisma, 'paypal', dto.orderId);
+    if (order.userId !== userId) throw new UnauthorizedException('Payment order belongs to another user');
+    let remote = await this.paypalRequest('get', `/v2/checkout/orders/${encodeURIComponent(dto.orderId)}`);
+    if (remote.status !== 'COMPLETED') remote = await this.paypalRequest('post', `/v2/checkout/orders/${encodeURIComponent(dto.orderId)}/capture`, {}, order.id);
+    const capture = remote.purchase_units?.[0]?.payments?.captures?.[0];
+    if (remote.id !== dto.orderId || remote.status !== 'COMPLETED' || remote.purchase_units?.length !== 1 ||
+      remote.purchase_units[0]?.payments?.captures?.length !== 1 || capture?.status !== 'COMPLETED') {
+      throw new BadRequestException('PayPal capture is not complete');
     }
-    await tx.webhookEvent.create({
-      data: {
-        eventId,
-        provider,
-        eventType,
-        payload: payload || {},
-        status: 'PROCESSED',
-      },
-    });
-    return false;
+    return this.atomic((tx) => this.settleOrder(tx, 'paypal', dto.orderId, capture.id,
+      this.decimalMinor(capture.amount?.value), capture.amount?.currency_code, { userId }));
   }
 
-  // A. STRIPE WEBHOOK HANDLER
+  private async processEvent(provider: string, eventId: string, type: string, payload: unknown,
+    apply: (tx: Prisma.TransactionClient) => Promise<void>) {
+    this.identifier(eventId, 'provider event ID');
+    this.identifier(type, 'provider event type');
+    const key = `${provider}:${eventId}`;
+    return this.atomic(async (tx) => {
+      // Recognize old rows too, while namespacing all new provider event identifiers.
+      const existing = await tx.webhookEvent.findFirst({ where: { provider, eventId: { in: [eventId, key] } } });
+      if (existing) return { received: true, duplicate: true };
+      await tx.webhookEvent.create({ data: { eventId: key, provider, eventType: type,
+        payload: { sha256: crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex') }, status: 'PROCESSED' } });
+      await apply(tx);
+      return { received: true };
+    });
+  }
+
+  private async lifecycle(tx: Prisma.TransactionClient, provider: string, remoteId: string,
+    status: 'ACTIVE' | 'PAST_DUE' | 'CANCELED', at: Date, period?: { start: Date; end: Date }) {
+    const field = provider === 'stripe' ? 'stripeSubscriptionId' : provider === 'razorpay' ? 'razorpaySubscriptionId' : 'paypalSubscriptionId';
+    this.identifier(remoteId, 'provider subscription ID');
+    const sub = await tx.subscription.findFirst({ where: { provider, [field]: remoteId } });
+    if (!sub) throw new NotFoundException('No matching provider subscription');
+    if (sub.status === 'CANCELED' && status !== 'CANCELED') return;
+    if (sub.lastProviderEventAt && (at < sub.lastProviderEventAt || (at.getTime() === sub.lastProviderEventAt.getTime() && sub.status === 'CANCELED'))) return;
+    if (status === 'ACTIVE' && !period && sub.currentPeriodEnd <= new Date()) return;
+    await tx.subscription.update({ where: { id: sub.id }, data: {
+      status, lastProviderEventAt: at,
+      ...(status === 'CANCELED' ? { canceledAt: at } : {}),
+      ...(period ? { currentPeriodStart: period.start, currentPeriodEnd: period.end } : {}),
+    } });
+    if (sub.userId) await this.refreshEntitlement(tx, sub.userId);
+  }
+
+  async handleRazorpayWebhook(payload: any, eventId?: string) {
+    const at = this.timestamp(payload?.created_at);
+    return this.processEvent('razorpay', eventId, payload?.event, payload, async (tx) => {
+      if (['payment.captured', 'order.paid'].includes(payload.event)) {
+        const payment = payload.payload?.payment?.entity;
+        if (payment?.status !== 'captured' || payment?.captured !== true) throw new BadRequestException('Webhook payment is not captured');
+        this.identifier(payment.order_id, 'Razorpay order ID');
+        await this.settleOrder(tx, 'razorpay', payment.order_id, payment.id, payment.amount, payment.currency, { eventAt: at });
+      } else if (payload.event === 'subscription.charged') {
+        // Legacy recurring contracts have no trusted stored amount/plan binding. Do not consume
+        // their payment events or invent renewals; retain a retryable failure for reconciliation.
+        throw new ServiceUnavailableException('Recurring Razorpay billing contract requires reconciliation');
+      } else if (['subscription.cancelled', 'subscription.completed', 'subscription.expired', 'subscription.pending',
+        'subscription.halted', 'subscription.paused', 'subscription.resumed', 'subscription.activated'].includes(payload.event)) {
+        const sub = payload.payload?.subscription?.entity;
+        const status = ['subscription.cancelled', 'subscription.completed', 'subscription.expired'].includes(payload.event) ? 'CANCELED' :
+          ['subscription.resumed', 'subscription.activated'].includes(payload.event) ? 'ACTIVE' : 'PAST_DUE';
+        await this.lifecycle(tx, 'razorpay', sub?.id, status, at);
+      }
+    });
+  }
+
   async handleStripeWebhook(event: Stripe.Event) {
-    this.logger.log(`Received Stripe Webhook Event: ${event.type} (ID: ${event.id})`);
-
-    return this.prisma.$transaction(async (tx) => {
-      const alreadyProcessed = await this.isEventAlreadyProcessed(
-        tx,
-        event.id,
-        'stripe',
-        event.type,
-        event.data.object,
-      );
-      if (alreadyProcessed) {
-        this.logger.log(`Stripe event ${event.id} already processed. Skipping duplicate.`);
-        return { received: true, duplicate: true };
-      }
-
-      // 1. Initial Checkout Completed
+    const at = this.timestamp(event?.created);
+    const object = event?.data?.object as any;
+    // Retrieve authoritative provider periods; never extend by an approximate 30/365 days.
+    let remote: Stripe.Subscription | undefined;
+    if (event.type === 'checkout.session.completed' || event.type === 'invoice.payment_succeeded') {
+      if (!this.stripe) throw new ServiceUnavailableException('Stripe is not configured');
+      const subscriptionId = typeof object?.subscription === 'string' ? object.subscription : object?.subscription?.id;
+      this.identifier(subscriptionId, 'Stripe subscription ID');
+      try { remote = await this.stripe.subscriptions.retrieve(subscriptionId); }
+      catch { throw new ServiceUnavailableException('Stripe subscription lookup failed'); }
+    }
+    return this.processEvent('stripe', event?.id, event?.type, object, async (tx) => {
       if (event.type === 'checkout.session.completed') {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const userId = session.metadata?.userId;
-        const tier = (session.metadata?.tier as SubscriptionTier) || SubscriptionTier.PRO;
-        const interval = (session.metadata?.interval as 'monthly' | 'yearly') || 'monthly';
-        const couponCode = session.metadata?.couponCode || undefined;
-
-        if (userId) {
-          const totalAmount = session.amount_total ? session.amount_total / 100 : this.getTierBaseAmount(tier, interval);
-
-          await this.activateOrRenewSubscription(tx, {
-            userId,
-            plan: tier,
-            interval,
-            provider: 'stripe',
-            providerPaymentId: session.id,
-            amount: totalAmount,
-            currency: session.currency?.toUpperCase() || 'USD',
-            stripeCustomerId: typeof session.customer === 'string' ? session.customer : undefined,
-            stripeSubscriptionId: typeof session.subscription === 'string' ? session.subscription : undefined,
-            metadata: { sessionId: session.id, tier, interval },
-            couponCode,
-          });
+        if (object.payment_status !== 'paid' || object.mode !== 'subscription') throw new BadRequestException('Stripe checkout is not paid');
+        const invoiceId = typeof object.invoice === 'string' ? object.invoice : object.invoice?.id;
+        await this.settleOrder(tx, 'stripe', object.id, this.identifier(invoiceId, 'Stripe invoice ID'),
+          object.amount_total, object.currency?.toUpperCase(), { subscriptionId: remote.id,
+            customerId: typeof object.customer === 'string' ? object.customer : undefined,
+            start: this.timestamp(remote.current_period_start), end: this.timestamp(remote.current_period_end, true), eventAt: at,
+            status: this.stripeState(remote.status) });
+      } else if (event.type === 'invoice.payment_succeeded') {
+        const sub = await tx.subscription.findUnique({ where: { stripeSubscriptionId: remote.id } });
+        if (!sub?.userId) throw new NotFoundException('Stripe checkout must be reconciled before renewal');
+        if (await this.existingPayment(tx, 'stripe', object.id)) return;
+        if (!Number.isSafeInteger(object.amount_paid) || object.amount_paid <= 0 || !/^[a-zA-Z]{3}$/.test(object.currency)) {
+          throw new BadRequestException('Invalid Stripe invoice amount');
         }
-      }
-
-      // 2. Recurring Invoice Payment Succeeded (Renewal)
-      else if (event.type === 'invoice.payment_succeeded') {
-        const invoice = event.data.object as Stripe.Invoice;
-        const subId = typeof invoice.subscription === 'string' ? invoice.subscription : null;
-
-        if (subId) {
-          const existingSub = await tx.subscription.findUnique({
-            where: { stripeSubscriptionId: subId },
-          });
-
-          if (existingSub && existingSub.userId) {
-            const interval = (existingSub.interval as 'monthly' | 'yearly') || 'monthly';
-            const periodMs = (interval === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000;
-            const newPeriodEnd = new Date(Date.now() + periodMs);
-
-            await tx.subscription.update({
-              where: { id: existingSub.id },
-              data: {
-                status: 'ACTIVE',
-                currentPeriodEnd: newPeriodEnd,
-                cancelAtPeriodEnd: false,
-              },
-            });
-
-            await tx.payment.create({
-              data: {
-                userId: existingSub.userId,
-                subscriptionId: existingSub.id,
-                provider: 'stripe',
-                providerPaymentId: invoice.id || `inv_${Date.now()}`,
-                amount: (invoice.amount_paid || 0) / 100,
-                currency: invoice.currency?.toUpperCase() || 'USD',
-                status: 'COMPLETED',
-                metadata: { invoiceId: invoice.id, subId },
-              },
-            });
-
-            this.logger.log(`[Stripe] Recurring subscription renewed for user ${existingSub.userId}`);
-          }
+        const end = this.timestamp(remote.current_period_end, true);
+        if (end < sub.currentPeriodEnd) throw new BadRequestException('Stale Stripe subscription period');
+        await this.recordPayment(tx, sub.userId, sub.id, 'stripe', object.id, object.amount_paid, object.currency.toUpperCase());
+        await this.lifecycle(tx, 'stripe', remote.id, this.stripeState(remote.status), at, { start: this.timestamp(remote.current_period_start), end });
+      } else if (event.type === 'customer.subscription.deleted') {
+        await this.lifecycle(tx, 'stripe', object?.id, 'CANCELED', at);
+      } else if (event.type === 'customer.subscription.updated') {
+        const state = this.stripeState(object?.status);
+        await this.lifecycle(tx, 'stripe', object?.id, state, at);
+        // Updates never extend the paid period; that requires a unique captured invoice.
+        const sub = await tx.subscription.findUnique({ where: { stripeSubscriptionId: object?.id } });
+        if (sub && (!sub.lastProviderEventAt || at >= sub.lastProviderEventAt)) {
+          await tx.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: object.cancel_at_period_end === true } });
         }
+      } else if (event.type === 'invoice.payment_failed') {
+        await this.lifecycle(tx, 'stripe', typeof object.subscription === 'string' ? object.subscription : object.subscription?.id, 'PAST_DUE', at);
       }
-
-      // 3. Invoice Payment Failed
-      else if (event.type === 'invoice.payment_failed') {
-        const invoice = event.data.object as Stripe.Invoice;
-        const subId = typeof invoice.subscription === 'string' ? invoice.subscription : null;
-
-        if (subId) {
-          const existingSub = await tx.subscription.findUnique({
-            where: { stripeSubscriptionId: subId },
-          });
-
-          if (existingSub) {
-            await tx.subscription.update({
-              where: { id: existingSub.id },
-              data: { status: 'PAST_DUE' },
-            });
-
-            if (existingSub.userId) {
-              await tx.payment.create({
-                data: {
-                  userId: existingSub.userId,
-                  subscriptionId: existingSub.id,
-                  provider: 'stripe',
-                  providerPaymentId: invoice.id || `failed_${Date.now()}`,
-                  amount: (invoice.amount_due || 0) / 100,
-                  currency: invoice.currency?.toUpperCase() || 'USD',
-                  status: 'FAILED',
-                  metadata: { failureReason: 'Payment attempt declined' },
-                },
-              });
-            }
-
-            this.logger.warn(`[Stripe] Subscription payment failed for sub ${subId}, status set to PAST_DUE`);
-          }
-        }
-      }
-
-      // 4. Subscription Terminated
-      else if (event.type === 'customer.subscription.deleted') {
-        const sub = event.data.object as Stripe.Subscription;
-        const existingSub = await tx.subscription.findUnique({
-          where: { stripeSubscriptionId: sub.id },
-        });
-
-        if (existingSub) {
-          await tx.subscription.update({
-            where: { id: existingSub.id },
-            data: { status: 'CANCELED', canceledAt: new Date() },
-          });
-
-          if (existingSub.userId) {
-            await tx.user.update({
-              where: { id: existingSub.userId },
-              data: { plan: 'FREE' },
-            });
-            this.logger.log(`[Stripe] Subscription deleted for user ${existingSub.userId}, downgraded to FREE`);
-          }
-        }
-      }
-
-      return { received: true };
     });
   }
 
-  // B. RAZORPAY WEBHOOK HANDLER
-  async handleRazorpayWebhook(payload: any) {
-    const event = payload?.event;
-    const eventId = payload?.payload?.payment?.entity?.id || `rzp_evt_${Date.now()}`;
-    this.logger.log(`Received Razorpay Webhook Event: ${event} (ID: ${eventId})`);
-
-    return this.prisma.$transaction(async (tx) => {
-      const alreadyProcessed = await this.isEventAlreadyProcessed(tx, eventId, 'razorpay', event || 'unknown', payload);
-      if (alreadyProcessed) return { received: true, duplicate: true };
-
-      if (event === 'payment.captured' || event === 'order.paid') {
-        const paymentEntity = payload?.payload?.payment?.entity;
-        const notes = paymentEntity?.notes || {};
-        const userId = notes.userId;
-        const tier = (notes.tier as SubscriptionTier) || SubscriptionTier.PRO;
-        const interval = (notes.interval as 'monthly' | 'yearly') || 'monthly';
-
-        if (userId) {
-          await this.activateOrRenewSubscription(tx, {
-            userId,
-            plan: tier,
-            interval,
-            provider: 'razorpay',
-            providerPaymentId: paymentEntity.id,
-            amount: (paymentEntity.amount || 0) / 100 / 83,
-            currency: 'USD',
-            razorpaySubscriptionId: paymentEntity.order_id,
-            metadata: paymentEntity,
-          });
-        }
-      } else if (event === 'subscription.cancelled' || event === 'subscription.halted') {
-        const subEntity = payload?.payload?.subscription?.entity;
-        if (subEntity?.id) {
-          const sub = await tx.subscription.findUnique({
-            where: { razorpaySubscriptionId: subEntity.id },
-          });
-          if (sub) {
-            await tx.subscription.update({
-              where: { id: sub.id },
-              data: { status: event === 'subscription.cancelled' ? 'CANCELED' : 'PAST_DUE' },
-            });
-            if (event === 'subscription.cancelled' && sub.userId) {
-              await tx.user.update({
-                where: { id: sub.userId },
-                data: { plan: 'FREE' },
-              });
-            }
-          }
-        }
-      }
-
-      return { received: true };
-    });
-  }
-
-  // C. PAYPAL WEBHOOK HANDLER
   async handlePayPalWebhook(payload: any) {
-    const eventType = payload?.event_type;
-    const eventId = payload?.id || `paypal_evt_${Date.now()}`;
-    this.logger.log(`Received PayPal Webhook Event: ${eventType} (ID: ${eventId})`);
-
-    return this.prisma.$transaction(async (tx) => {
-      const alreadyProcessed = await this.isEventAlreadyProcessed(tx, eventId, 'paypal', eventType || 'unknown', payload);
-      if (alreadyProcessed) return { received: true, duplicate: true };
-
-      if (eventType === 'PAYMENT.CAPTURE.COMPLETED' || eventType === 'CHECKOUT.ORDER.APPROVED') {
-        const resource = payload?.resource;
-        const customId = resource?.custom_id; // Contains userId
-        if (customId) {
-          await this.activateOrRenewSubscription(tx, {
-            userId: customId,
-            plan: SubscriptionTier.PRO,
-            interval: 'monthly',
-            provider: 'paypal',
-            providerPaymentId: resource.id || eventId,
-            amount: parseFloat(resource?.amount?.value || '12.00'),
-            currency: resource?.amount?.currency_code || 'USD',
-            paypalSubscriptionId: resource.id,
-            metadata: resource,
-          });
-        }
-      } else if (eventType === 'BILLING.SUBSCRIPTION.CANCELLED') {
-        const resource = payload?.resource;
-        if (resource?.id) {
-          const sub = await tx.subscription.findUnique({
-            where: { paypalSubscriptionId: resource.id },
-          });
-          if (sub) {
-            await tx.subscription.update({
-              where: { id: sub.id },
-              data: { status: 'CANCELED', canceledAt: new Date() },
-            });
-            if (sub.userId) {
-              await tx.user.update({
-                where: { id: sub.userId },
-                data: { plan: 'FREE' },
-              });
-            }
-          }
-        }
+    const at = new Date(payload?.create_time);
+    if (!Number.isFinite(at.getTime())) throw new BadRequestException('Missing PayPal event timestamp');
+    return this.processEvent('paypal', payload?.id, payload?.event_type, payload, async (tx) => {
+      if (payload.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
+        const capture = payload.resource;
+        if (capture?.status !== 'COMPLETED') throw new BadRequestException('PayPal capture is not complete');
+        const orderId = capture.supplementary_data?.related_ids?.order_id;
+        this.identifier(orderId, 'PayPal order ID');
+        await this.settleOrder(tx, 'paypal', orderId, capture.id, this.decimalMinor(capture.amount?.value), capture.amount?.currency_code, { eventAt: at });
+      } else if (payload.event_type === 'BILLING.SUBSCRIPTION.CANCELLED' || payload.event_type === 'BILLING.SUBSCRIPTION.SUSPENDED') {
+        await this.lifecycle(tx, 'paypal', payload.resource?.id,
+          payload.event_type === 'BILLING.SUBSCRIPTION.CANCELLED' ? 'CANCELED' : 'PAST_DUE', at);
+      } else if (payload.event_type === 'PAYMENT.SALE.COMPLETED') {
+        throw new ServiceUnavailableException('Recurring PayPal billing contract requires reconciliation');
       }
-
-      return { received: true };
+      // CHECKOUT.ORDER.APPROVED is approval, not capture, and never grants entitlements.
     });
   }
-
-  // ============================================================================
-  // 9. CANCELLATION & REACTIVATION LIFECYCLE
-  // ============================================================================
 
   async cancelSubscription(userId: string) {
-    const sub = await this.prisma.subscription.findFirst({
-      where: { userId, status: 'ACTIVE' },
-    });
-
-    if (!sub) {
-      throw new BadRequestException('No active subscription found to cancel');
+    const sub = await this.prisma.subscription.findFirst({ where: { userId, status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } });
+    if (!sub || sub.cancelAtPeriodEnd) throw new BadRequestException('No active subscription available to cancel');
+    if (sub.provider === 'stripe' && sub.stripeSubscriptionId) {
+      if (!this.isStripeEnabled()) throw new ServiceUnavailableException('Stripe is not configured');
+      try { await this.stripe.subscriptions.update(sub.stripeSubscriptionId, { cancel_at_period_end: true }); }
+      catch { throw new ServiceUnavailableException('Provider cancellation failed'); }
+    } else if (sub.razorpaySubscriptionId || sub.paypalSubscriptionId) {
+      throw new ServiceUnavailableException('Manage this recurring subscription with the payment provider');
     }
-
-    if (sub.cancelAtPeriodEnd) {
-      throw new BadRequestException('This subscription is already scheduled for cancellation');
-    }
-
-    // Inform Stripe if active Stripe subscription
-    if (this.stripe && sub.stripeSubscriptionId && !sub.stripeSubscriptionId.startsWith('sub_mock')) {
-      try {
-        await this.stripe.subscriptions.update(sub.stripeSubscriptionId, {
-          cancel_at_period_end: true,
-        });
-      } catch (err) {
-        this.logger.warn(`Stripe subscription cancel_at_period_end notice failed: ${(err as Error).message}`);
-      }
-    }
-
-    await this.prisma.subscription.update({
-      where: { id: sub.id },
-      data: {
-        cancelAtPeriodEnd: true,
-        canceledAt: new Date(),
-      },
-    });
-
-    return {
-      success: true,
-      message: 'Your subscription has been scheduled to cancel at the end of the current billing cycle.',
-      currentPeriodEnd: sub.currentPeriodEnd,
-    };
+    await this.prisma.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: true } });
+    return { success: true, message: 'Cancellation is scheduled for the end of the paid period.', currentPeriodEnd: sub.currentPeriodEnd };
   }
 
   async reactivateSubscription(userId: string) {
-    const sub = await this.prisma.subscription.findFirst({
-      where: { userId, status: 'ACTIVE', cancelAtPeriodEnd: true },
-    });
-
-    if (!sub) {
-      throw new BadRequestException('No canceled subscription pending period-end found to reactivate');
+    const sub = await this.prisma.subscription.findFirst({ where: { userId, status: 'ACTIVE', cancelAtPeriodEnd: true, currentPeriodEnd: { gt: new Date() } }, orderBy: { createdAt: 'desc' } });
+    if (!sub) throw new BadRequestException('No unexpired subscription is scheduled for cancellation');
+    if (sub.provider === 'stripe' && sub.stripeSubscriptionId) {
+      if (!this.isStripeEnabled()) throw new ServiceUnavailableException('Stripe is not configured');
+      try { await this.stripe.subscriptions.update(sub.stripeSubscriptionId, { cancel_at_period_end: false }); }
+      catch { throw new ServiceUnavailableException('Provider reactivation failed'); }
+    } else if (sub.razorpaySubscriptionId || sub.paypalSubscriptionId) {
+      throw new ServiceUnavailableException('Manage this recurring subscription with the payment provider');
     }
-
-    // Inform Stripe if active Stripe subscription
-    if (this.stripe && sub.stripeSubscriptionId && !sub.stripeSubscriptionId.startsWith('sub_mock')) {
-      try {
-        await this.stripe.subscriptions.update(sub.stripeSubscriptionId, {
-          cancel_at_period_end: false,
-        });
-      } catch (err) {
-        this.logger.warn(`Stripe subscription reactivate notice failed: ${(err as Error).message}`);
-      }
-    }
-
-    await this.prisma.subscription.update({
-      where: { id: sub.id },
-      data: {
-        cancelAtPeriodEnd: false,
-        canceledAt: null,
-      },
-    });
-
-    return {
-      success: true,
-      message: 'Your subscription has been successfully reactivated!',
-      currentPeriodEnd: sub.currentPeriodEnd,
-    };
+    await this.prisma.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: false, canceledAt: null } });
+    return { success: true, message: 'Subscription reactivated.', currentPeriodEnd: sub.currentPeriodEnd };
   }
-
-  // ============================================================================
-  // 10. BILLING HISTORY & INVOICE STREAMING
-  // ============================================================================
 
   async getUserBillingHistory(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -1120,7 +771,7 @@ export class BillingService {
     const activeSubscription = user.subscriptions.find((s) => s.status === 'ACTIVE') || null;
 
     return {
-      currentPlan: user.plan,
+      currentPlan: await effectivePlan(this.prisma, user),
       subscription: activeSubscription,
       subscriptions: user.subscriptions,
       payments: user.payments,
@@ -1141,14 +792,20 @@ export class BillingService {
       throw new NotFoundException('User not found');
     }
 
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { userId, status: 'PAID' }, orderBy: { createdAt: 'desc' },
+    });
+    if (!invoice) throw new NotFoundException('No paid invoice is available');
+
     const org = user.memberships[0]?.organization;
-    const invoiceNum = `INV-${new Date().getFullYear()}-${userId.substring(0, 4).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const invoiceNum = invoice.invoiceNumber;
     const workerUrl = this.configService.get<string>('PDF_WORKER_URL', 'http://pdf-worker:8000');
-    const workerSecret = this.configService.get<string>('WORKER_CALLBACK_SECRET', 'pdfforge-worker-internal-secret');
-    const amount = this.getTierBaseAmount(user.plan as any);
+    const workerSecret = this.configService.get<string>('WORKER_CALLBACK_SECRET');
+    const amount = invoice.amount;
 
     let pdfBuffer: Buffer;
     try {
+      if (!this.configured(workerSecret)) throw new Error('Worker authentication unavailable');
       const res = await axios.post(
         `${workerUrl}/api/v1/invoices/generate`,
         {
@@ -1157,7 +814,8 @@ export class BillingService {
           customerEmail: user.email,
           organizationName: org?.name || 'Personal Workspace',
           planTier: user.plan,
-          currency: 'USD',
+          amount,
+          currency: invoice.currency,
         },
         {
           headers: { 'x-pdfforge-worker-secret': workerSecret },
@@ -1168,19 +826,8 @@ export class BillingService {
       pdfBuffer = Buffer.from(res.data);
     } catch {
       this.logger.warn(`PDF worker unavailable for invoice generation, using high-fidelity fallback generator`);
-      pdfBuffer = this.generateMinimalPdf(invoiceNum, user.name || 'Valued Customer', user.plan, amount);
+      pdfBuffer = this.generateMinimalPdf(invoiceNum, user.name || 'Valued Customer', user.plan, amount, invoice.currency);
     }
-
-    // Record invoice in DB
-    await this.prisma.invoice.create({
-      data: {
-        userId,
-        invoiceNumber: invoiceNum,
-        amount,
-        currency: 'USD',
-        status: 'PAID',
-      },
-    });
 
     return {
       invoiceNumber: invoiceNum,
@@ -1193,17 +840,18 @@ export class BillingService {
     customerName: string,
     planTier: string,
     amount: number,
+    currency: string,
   ): Buffer {
-    const cleanCustomer = customerName.replace(/[()]/g, '');
+    const cleanCustomer = customerName.replace(/[^\x20-\x7E]|[()\\]/g, '');
     const dateStr = new Date().toISOString().slice(0, 10);
     const stream = `BT /F1 16 Tf 50 740 Td (PDFForge AI - Official Tax Invoice) Tj ET
 BT /F1 12 Tf 50 700 Td (Invoice Reference: ${invoiceNumber}) Tj ET
 BT /F1 12 Tf 50 675 Td (Billed To: ${cleanCustomer}) Tj ET
 BT /F1 12 Tf 50 650 Td (Plan Tier: ${planTier}) Tj ET
-BT /F1 12 Tf 50 625 Td (Total Amount Paid: $${amount.toFixed(2)} USD) Tj ET
+BT /F1 12 Tf 50 625 Td (Total Amount Paid: ${amount.toFixed(2)} ${currency}) Tj ET
 BT /F1 12 Tf 50 600 Td (Payment Status: COMPLETED / PAID) Tj ET
 BT /F1 12 Tf 50 575 Td (Issue Date: ${dateStr}) Tj ET
-BT /F1 10 Tf 50 530 Td (Compliant with EU VAT Directive, IRS Form 1099, and digital e-invoicing.) Tj ET
+BT /F1 10 Tf 50 530 Td (Payment receipt for the recorded transaction.) Tj ET
 BT /F1 10 Tf 50 510 Td (Thank you for subscribing to PDFForge AI Enterprise SaaS Cloud.) Tj ET`;
 
     const pdf = `%PDF-1.4

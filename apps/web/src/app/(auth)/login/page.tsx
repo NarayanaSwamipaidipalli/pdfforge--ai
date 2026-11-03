@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
+import { safeLocalRedirect } from '@/lib/safe-redirect.mjs';
 import {
   FileCheck2,
   ArrowRight,
@@ -17,7 +18,7 @@ import {
   Mail,
 } from 'lucide-react';
 
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const rawApiUrl = '/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 const API_V1 = `${API_BASE}/api/v1`;
 
@@ -35,7 +36,7 @@ function LoginForm() {
   // If already authenticated, redirect
   useEffect(() => {
     if (isHydrated && isAuthenticated) {
-      const redirectTarget = searchParams.get('redirect') || '/dashboard';
+      const redirectTarget = safeLocalRedirect(searchParams.get('redirect'));
       router.push(redirectTarget);
     }
   }, [isHydrated, isAuthenticated, router, searchParams]);
@@ -52,11 +53,15 @@ function LoginForm() {
     let isMounted = true;
     const initGoogleGsi = async () => {
       try {
-        const res = await fetch(`${API_V1}/auth/google/url`);
+        const res = await fetch(`${API_V1}/auth/google/url`, { credentials: 'include' });
         if (!res.ok) return;
         const data = await res.json();
         const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || data.clientId;
-        if (!clientId || typeof window === 'undefined' || !isMounted) return;
+        const isRealClientId =
+          clientId &&
+          clientId.includes('.apps.googleusercontent.com') &&
+          !clientId.startsWith('pdfforge-google-client-id');
+        if (!isRealClientId || typeof window === 'undefined' || !isMounted) return;
 
         if (!document.getElementById('google-gsi-script')) {
           const script = document.createElement('script');
@@ -100,7 +105,7 @@ function LoginForm() {
                         authData.tokens.accessToken,
                       );
 
-                      const redirectTarget = searchParams.get('redirect') || '/dashboard';
+                      const redirectTarget = safeLocalRedirect(searchParams.get('redirect'));
                       router.push(redirectTarget);
                     } catch (err: any) {
                       setError(err.message || 'Google authentication failed');
@@ -162,7 +167,7 @@ function LoginForm() {
         data.tokens.accessToken,
       );
 
-      const redirectTarget = searchParams.get('redirect') || '/dashboard';
+      const redirectTarget = safeLocalRedirect(searchParams.get('redirect'));
       router.push(redirectTarget);
     } catch (err: any) {
       setError(err.message || 'Network connection failed. Please ensure backend is running.');
@@ -181,7 +186,7 @@ function LoginForm() {
     setError(null);
     try {
       const callbackTarget = `${window.location.origin}/auth/callback`;
-      const res = await fetch(`${API_V1}/auth/google/url?redirect_uri=${encodeURIComponent(callbackTarget)}`);
+      const res = await fetch(`${API_V1}/auth/google/url?redirect_uri=${encodeURIComponent(callbackTarget)}`, { credentials: 'include' });
       const data = await res.json();
 
       if (data.url) {

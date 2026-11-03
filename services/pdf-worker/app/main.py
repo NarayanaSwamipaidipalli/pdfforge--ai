@@ -1,97 +1,85 @@
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning, module="fitz")
-
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
 import hmac
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+import logging
+import os
+import re
+import tempfile
+import warnings
+from contextlib import contextmanager
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.ai import document_intelligence
+from app.celery_app import get_s3_client, process_pdf_task
 from app.config import settings
-from app.celery_app import process_pdf_task
+from app.processors.invoice_generator import generate_invoice_pdf
+
+warnings.filterwarnings("ignore", category=FutureWarning, module="fitz")
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="PDFForge AI - PDF Processing Worker Engine",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    docs_url=None if settings.ENVIRONMENT == "production" else "/docs",
+    redoc_url=None if settings.ENVIRONMENT == "production" else "/redoc",
 )
 
+
+def require_worker_auth(
+    x_pdfforge_worker_secret: Optional[str] = Header(default=None, alias="x-pdfforge-worker-secret"),
+):
+    expected = settings.WORKER_CALLBACK_SECRET
+    if not expected:
+        raise HTTPException(status_code=503, detail="Worker authentication is not configured")
+    if not x_pdfforge_worker_secret or not hmac.compare_digest(
+        x_pdfforge_worker_secret.encode("utf-8"), expected.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="Invalid worker authentication")
+
+
+# Every API route shares this dependency, including future endpoints added here.
+protected = APIRouter(prefix="/api/v1", dependencies=[Depends(require_worker_auth)])
+
+
 class FileItem(BaseModel):
-    id: str
-    originalName: str
-    s3Key: str
+    id: UUID
+    originalName: str = Field(min_length=1, max_length=255)
+    s3Key: str = Field(min_length=1, max_length=1024)
+
 
 class ProcessJobRequest(BaseModel):
-    jobId: str
-    tool: str
-    files: List[FileItem]
-    parameters: Optional[Dict[str, Any]] = {}
+    jobId: UUID
+    tool: str = Field(min_length=1, max_length=100)
+    files: List[FileItem] = Field(min_length=1, max_length=100)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
     callbackUrl: Optional[str] = None
+
 
 @app.get("/health")
 def health_check():
-    return {
-        "status": "HEALTHY",
-        "service": settings.APP_NAME,
-        "environment": settings.ENVIRONMENT,
-        "supportedTools": [
-            "merge", "split", "compress", "rotate", "delete_pages",
-            "extract_pages", "reorder", "watermark", "encrypt", "decrypt",
-            "pdf_to_word", "pdf_to_excel", "pdf_to_images", "images_to_pdf",
-            "ocr", "compare", "repair", "metadata", "signature", "bates", "redact"
-        ]
-    }
+    return {"status": "HEALTHY", "service": settings.APP_NAME}
 
-@app.post("/api/v1/jobs/process")
-async def dispatch_job(
-    payload: ProcessJobRequest,
-    background_tasks: BackgroundTasks,
-    x_pdfforge_worker_secret: str = Header(..., alias="x-pdfforge-worker-secret"),
-):
-    """
-    Accepts processing requests from API Gateway and dispatches to Celery queue
-    or background worker thread.
-    """
-    if not settings.WORKER_CALLBACK_SECRET or not hmac.compare_digest(
-        x_pdfforge_worker_secret, settings.WORKER_CALLBACK_SECRET
-    ):
-        raise HTTPException(status_code=401, detail="Invalid worker authentication")
+
+@protected.post("/jobs/process")
+async def dispatch_job(payload: ProcessJobRequest):
+    if payload.callbackUrl:
+        expected_callback = f"{settings.API_GATEWAY_INTERNAL_URL.rstrip('/')}/api/v1/pdf/jobs/callback"
+        if not settings.API_GATEWAY_INTERNAL_URL or payload.callbackUrl != expected_callback:
+            raise HTTPException(status_code=400, detail="Unapproved job callback URL")
     try:
-        # Enqueue in Celery
         task = process_pdf_task.delay(
-            payload.jobId,
-            payload.tool,
-            [f.model_dump() for f in payload.files],
-            payload.parameters,
-            payload.callbackUrl
+            str(payload.jobId), payload.tool,
+            [f.model_dump(mode="json") for f in payload.files],
+            payload.parameters, payload.callbackUrl,
         )
-        return {
-            "status": "ACCEPTED",
-            "jobId": payload.jobId,
-            "celeryTaskId": str(task.id)
-        }
-    except Exception as e:
-        # Fallback to local background tasks if Redis broker isn't active in dev
-        background_tasks.add_task(
-            process_pdf_task,
-            None,
-            payload.jobId,
-            payload.tool,
-            [f.model_dump() for f in payload.files],
-            payload.parameters,
-            payload.callbackUrl
-        )
-        return {
-            "status": "ACCEPTED_LOCAL_FALLBACK",
-            "jobId": payload.jobId,
-            "info": str(e)
-        }
+    except Exception:
+        logger.warning("PDF processing queue unavailable")
+        raise HTTPException(status_code=503, detail="Processing queue unavailable") from None
+    return {"status": "ACCEPTED", "jobId": str(payload.jobId), "celeryTaskId": str(task.id)}
 
-from fastapi.responses import Response
-from app.processors.invoice_generator import generate_invoice_pdf
-from app.celery_app import get_s3_client
-from app.ai import document_intelligence
-import tempfile
-import os
 
 class GenerateInvoiceRequest(BaseModel):
     invoiceNumber: Optional[str] = None
@@ -105,168 +93,79 @@ class GenerateInvoiceRequest(BaseModel):
     currency: Optional[str] = "USD"
     checksum: Optional[str] = None
 
-@app.post("/api/v1/invoices/generate")
+
+@protected.post("/invoices/generate")
 async def generate_invoice_endpoint(payload: GenerateInvoiceRequest):
-    """
-    Generates an enterprise vector PDF invoice receipt using ReportLab.
-    """
     try:
         pdf_bytes = generate_invoice_pdf(payload.model_dump())
-        filename = payload.invoiceNumber or "invoice"
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}.pdf"
-            }
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Invoice generation failed: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Invoice generation failed") from None
+    filename = re.sub(r"[^a-zA-Z0-9._-]", "_", payload.invoiceNumber or "invoice")[:100]
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'},
+    )
 
-def download_temp_s3_file(s3_key: str) -> str:
-    s3 = get_s3_client()
-    suffix = os.path.splitext(s3_key)[1] or ".pdf"
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    tmp_path = tmp.name
-    tmp.close()
-    s3.download_file(settings.S3_BUCKET_NAME, s3_key, tmp_path)
-    return tmp_path
+
+@contextmanager
+def downloaded_document(s3_key: str):
+    with tempfile.TemporaryDirectory(prefix="pdfforge-ai-") as directory:
+        path = os.path.join(directory, "document.pdf")
+        try:
+            get_s3_client().download_file(settings.S3_BUCKET_NAME, s3_key, path)
+        except Exception:
+            raise HTTPException(status_code=502, detail="Document download failed") from None
+        yield path
+
 
 class AiBaseRequest(BaseModel):
-    s3Key: Optional[str] = None
-    localPath: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+    s3Key: str = Field(min_length=1, max_length=1024)
+
 
 class AiSummarizeRequest(AiBaseRequest):
     focusTopics: Optional[List[str]] = None
     targetLength: Optional[str] = "balanced"
 
+
 class AiChatRequest(AiBaseRequest):
-    question: str
+    question: str = Field(min_length=1)
 
-class AiExtractInvoiceRequest(AiBaseRequest):
-    pass
 
-class AiAnalyzeContractRequest(AiBaseRequest):
-    pass
+def run_document_operation(s3_key, operation, **kwargs):
+    with downloaded_document(s3_key) as local_path:
+        try:
+            return operation(local_path, **kwargs)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Document analysis failed") from None
 
-class AiExtractTextRequest(AiBaseRequest):
-    pass
 
-@app.post("/api/v1/ai/summarize")
+@protected.post("/ai/summarize")
 async def ai_summarize_endpoint(payload: AiSummarizeRequest):
-    path_to_clean = None
-    try:
-        if payload.s3Key:
-            local_path = download_temp_s3_file(payload.s3Key)
-            path_to_clean = local_path
-        elif payload.localPath and os.path.exists(payload.localPath):
-            local_path = payload.localPath
-        else:
-            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
-            
-        result = document_intelligence.summarize_document(
-            local_path,
-            focus_topics=payload.focusTopics,
-            target_length=payload.targetLength or "balanced"
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI Summarization failed: {str(e)}")
-    finally:
-        if path_to_clean and os.path.exists(path_to_clean):
-            try:
-                os.remove(path_to_clean)
-            except Exception:
-                pass
+    return run_document_operation(
+        payload.s3Key, document_intelligence.summarize_document,
+        focus_topics=payload.focusTopics, target_length=payload.targetLength or "balanced",
+    )
 
-@app.post("/api/v1/ai/chat")
+
+@protected.post("/ai/chat")
 async def ai_chat_endpoint(payload: AiChatRequest):
-    path_to_clean = None
-    try:
-        if payload.s3Key:
-            local_path = download_temp_s3_file(payload.s3Key)
-            path_to_clean = local_path
-        elif payload.localPath and os.path.exists(payload.localPath):
-            local_path = payload.localPath
-        else:
-            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
-            
-        result = document_intelligence.chat_with_document(local_path, payload.question)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI Chat failed: {str(e)}")
-    finally:
-        if path_to_clean and os.path.exists(path_to_clean):
-            try:
-                os.remove(path_to_clean)
-            except Exception:
-                pass
+    return run_document_operation(payload.s3Key, document_intelligence.chat_with_document, question=payload.question)
 
-@app.post("/api/v1/ai/extract-invoice")
-async def ai_extract_invoice_endpoint(payload: AiExtractInvoiceRequest):
-    path_to_clean = None
-    try:
-        if payload.s3Key:
-            local_path = download_temp_s3_file(payload.s3Key)
-            path_to_clean = local_path
-        elif payload.localPath and os.path.exists(payload.localPath):
-            local_path = payload.localPath
-        else:
-            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
-            
-        result = document_intelligence.extract_invoice_data(local_path)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Invoice extraction failed: {str(e)}")
-    finally:
-        if path_to_clean and os.path.exists(path_to_clean):
-            try:
-                os.remove(path_to_clean)
-            except Exception:
-                pass
 
-@app.post("/api/v1/ai/analyze-contract")
-async def ai_analyze_contract_endpoint(payload: AiAnalyzeContractRequest):
-    path_to_clean = None
-    try:
-        if payload.s3Key:
-            local_path = download_temp_s3_file(payload.s3Key)
-            path_to_clean = local_path
-        elif payload.localPath and os.path.exists(payload.localPath):
-            local_path = payload.localPath
-        else:
-            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
-            
-        result = document_intelligence.analyze_contract_data(local_path)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Contract analysis failed: {str(e)}")
-    finally:
-        if path_to_clean and os.path.exists(path_to_clean):
-            try:
-                os.remove(path_to_clean)
-            except Exception:
-                pass
+@protected.post("/ai/extract-invoice")
+async def ai_extract_invoice_endpoint(payload: AiBaseRequest):
+    return run_document_operation(payload.s3Key, document_intelligence.extract_invoice_data)
 
-@app.post("/api/v1/ai/extract-text")
-async def ai_extract_text_endpoint(payload: AiExtractTextRequest):
-    path_to_clean = None
-    try:
-        if payload.s3Key:
-            local_path = download_temp_s3_file(payload.s3Key)
-            path_to_clean = local_path
-        elif payload.localPath and os.path.exists(payload.localPath):
-            local_path = payload.localPath
-        else:
-            raise HTTPException(status_code=400, detail="Must provide valid s3Key or localPath")
-            
-        result = document_intelligence.extract_tables_and_text(local_path)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Text extraction failed: {str(e)}")
-    finally:
-        if path_to_clean and os.path.exists(path_to_clean):
-            try:
-                os.remove(path_to_clean)
-            except Exception:
-                pass
+
+@protected.post("/ai/analyze-contract")
+async def ai_analyze_contract_endpoint(payload: AiBaseRequest):
+    return run_document_operation(payload.s3Key, document_intelligence.analyze_contract_data)
+
+
+@protected.post("/ai/extract-text")
+async def ai_extract_text_endpoint(payload: AiBaseRequest):
+    return run_document_operation(payload.s3Key, document_intelligence.extract_tables_and_text)
+
+
+app.include_router(protected)

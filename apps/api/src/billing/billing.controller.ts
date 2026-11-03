@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, UseGuards, Res, Req, Headers, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, Res, Req, Headers, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { BillingService } from './billing.service';
 import {
@@ -117,11 +117,14 @@ export class BillingController {
   async handleRazorpayWebhook(
     @Req() req: Request,
     @Headers('x-razorpay-signature') signature: string,
+    @Headers('x-razorpay-event-id') eventId: string,
   ) {
     const rawBody = (req as any).rawBody;
     this.billingService.verifyRazorpayWebhook(rawBody, signature);
-    const event = rawBody ? JSON.parse(rawBody.toString('utf8')) : req.body;
-    return this.billingService.handleRazorpayWebhook(event);
+    let event: unknown;
+    try { event = JSON.parse(rawBody.toString('utf8')); }
+    catch { throw new BadRequestException('Invalid webhook JSON'); }
+    return this.billingService.handleRazorpayWebhook(event, eventId);
   }
 
   @Post('webhook/paypal')
@@ -130,7 +133,9 @@ export class BillingController {
   async handlePayPalWebhook(@Req() req: Request, @Headers() headers: Record<string, string>) {
     const rawBody = (req as any).rawBody;
     await this.billingService.verifyPayPalWebhook(rawBody, headers);
-    const event = rawBody ? JSON.parse(rawBody.toString('utf8')) : req.body;
+    let event: unknown;
+    try { event = JSON.parse(rawBody.toString('utf8')); }
+    catch { throw new BadRequestException('Invalid webhook JSON'); }
     return this.billingService.handlePayPalWebhook(event);
   }
 

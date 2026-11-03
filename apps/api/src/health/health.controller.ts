@@ -30,7 +30,7 @@ export class HealthController {
       await this.prisma.$queryRaw`SELECT 1`;
       checks.database = 'UP';
     } catch (dbErr: any) {
-      checks.database = `DOWN: ${dbErr.message}`;
+      checks.database = 'DOWN';
       isHealthy = false;
     }
 
@@ -63,7 +63,7 @@ export class HealthController {
       await this.prisma.$queryRaw`SELECT 1`;
       return res.status(HttpStatus.OK).json({ status: 'ready' });
     } catch (err: any) {
-      return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({ status: 'not_ready', error: err.message });
+      return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({ status: 'not_ready' });
     }
   }
 }

@@ -1,4 +1,5 @@
 'use client';
+import { completeRazorpayCheckout } from '@/lib/razorpay-checkout';
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -18,7 +19,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const rawApiUrl = '/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 const API_V1 = `${API_BASE}/api/v1`;
 
@@ -195,32 +196,15 @@ export default function PricingPage() {
       });
 
       const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Checkout failed');
 
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       } else if (data.approvalUrl) {
         window.location.href = data.approvalUrl;
       } else if (data.orderId) {
-        // Razorpay checkout modal simulation
-        const confirmPay = confirm(`Razorpay Order Created: ${data.orderId}\nAmount: ₹${(data.amount / 100).toFixed(2)}\nProceed with payment simulation?`);
-        if (confirmPay) {
-          const verifyRes = await fetch(`${API_V1}/billing/razorpay/verify`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({
-              orderId: data.orderId,
-              paymentId: `pay_${Date.now()}`,
-              signature: 'rzp_verified_sig',
-              tier: selectedPlan.tier,
-            }),
-          });
-          const vData = await verifyRes.json();
-          alert(vData.message || 'Payment verified! Plan activated.');
-          router.push('/dashboard?upgrade=success');
-        }
+        await completeRazorpayCheckout(data, authToken);
+        router.push('/dashboard?upgrade=success');
       }
     } catch (err: any) {
       alert(`Checkout failed: ${err.message}`);

@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET', 'pdfforge-enterprise-jwt-super-secret-key-2026'),
+        secret: config.getOrThrow<string>('JWT_SECRET'),
         signOptions: { expiresIn: '15m' },
       }),
     }),

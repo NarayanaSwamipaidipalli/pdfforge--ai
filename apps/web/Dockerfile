@@ -1,27 +1,36 @@
 # Multi-stage production build for Next.js 15
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 RUN apk add --no-cache libc6-compat
 
 WORKDIR /app
 COPY package*.json ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci \
+    --no-audit \
+    --no-fund \
+    --prefer-offline \
+    --fetch-retries=1 \
+    --fetch-timeout=60000 \
+    --loglevel=http
 COPY . .
 RUN mkdir -p public
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
+RUN addgroup -S pdfforge && adduser -S pdfforge -G pdfforge
+COPY --from=builder --chown=pdfforge:pdfforge /app/public ./public
+COPY --from=builder --chown=pdfforge:pdfforge /app/.next/standalone ./
+COPY --from=builder --chown=pdfforge:pdfforge /app/.next/static ./.next/static
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
 
 EXPOSE 3000
-CMD ["npm", "start"]
+USER pdfforge
+CMD ["node", "server.js"]

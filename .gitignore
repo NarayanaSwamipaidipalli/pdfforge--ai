@@ -56,3 +56,9 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Private remediation evidence, database backups, and compiler/test caches
+.remediation/
+migration-backups/
+*.tsbuildinfo
+.pytest_cache/

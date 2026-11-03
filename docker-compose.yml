@@ -6,10 +6,10 @@ services:
     restart: always
     environment:
       POSTGRES_USER: pdfforge
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pdfforge_secure_pass_2026}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       POSTGRES_DB: pdfforge_db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +25,7 @@ services:
     restart: always
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -36,16 +36,16 @@ services:
 
   # MinIO S3-Compatible Local Storage
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: ${MINIO_IMAGE:?Set a verified MinIO image tag or digest}
     container_name: pdfforge-minio
     restart: always
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
 
@@ -56,7 +56,7 @@ services:
     container_name: pdfforge-ollama-sidecar
     restart: always
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_models:/root/.ollama
     environment:
@@ -73,24 +73,25 @@ services:
     environment:
       PORT: 4000
       NODE_ENV: production
-      DATABASE_URL: postgresql://pdfforge:${POSTGRES_PASSWORD:-pdfforge_secure_pass_2026}@postgres:5432/pdfforge_db?schema=public
+      DATABASE_URL: postgresql://pdfforge:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/pdfforge_db?schema=public
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
       S3_PUBLIC_ENDPOINT: http://localhost:9000
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
       S3_BUCKET_NAME: pdfforge-documents
       PDF_WORKER_URL: http://pdf-worker:8000
       API_GATEWAY_INTERNAL_URL: http://api-gateway:4000
-      WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:-pdfforge-worker-internal-secret}
-      JWT_SECRET: ${JWT_SECRET:-pdfforge-enterprise-jwt-super-secret-key-2026}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-pdfforge-enterprise-refresh-secret-key-2026}
+      WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:?Set a random WORKER_CALLBACK_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?Set a random JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set a separate random JWT_REFRESH_SECRET}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:4000/api/v1/auth/google/callback}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,16 +107,18 @@ services:
     restart: always
     environment:
       REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: production
+      API_GATEWAY_INTERNAL_URL: http://api-gateway:4000
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       S3_ENDPOINT: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
       S3_BUCKET_NAME: pdfforge-documents
       PYTHONWARNINGS: "ignore::FutureWarning:fitz"
-      WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:-pdfforge-worker-internal-secret}
+      WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:?Set a random WORKER_CALLBACK_SECRET}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       - redis
 
@@ -129,14 +132,16 @@ services:
     command: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=2 --max-tasks-per-child=10
     environment:
       REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: production
+      API_GATEWAY_INTERNAL_URL: http://api-gateway:4000
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       S3_ENDPOINT: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
       S3_BUCKET_NAME: pdfforge-documents
       PYTHONWARNINGS: "ignore::FutureWarning:fitz"
-      WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:-pdfforge-worker-internal-secret}
+      WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:?Set a random WORKER_CALLBACK_SECRET}
     depends_on:
       - redis
       - pdf-worker
@@ -149,10 +154,10 @@ services:
     container_name: pdfforge-web
     restart: always
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
+      API_GATEWAY_INTERNAL_URL: http://api-gateway:4000
       NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - api-gateway
 

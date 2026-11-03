@@ -3,6 +3,9 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="fitz")
 
 import os
 import time
+import logging
+import tempfile
+from uuid import UUID
 import httpx
 import boto3
 from celery import Celery
@@ -10,13 +13,15 @@ from app.config import settings
 from app.processors import basic_tools, conversions, advanced_tools
 from app.ai import document_intelligence
 
+logger = logging.getLogger(__name__)
+
 def get_s3_client():
     endpoint = settings.S3_ENDPOINT if settings.S3_ENDPOINT else None
     return boto3.client(
         's3',
         endpoint_url=endpoint,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID or None,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY or None,
         region_name=settings.AWS_REGION
     )
 
@@ -43,17 +48,23 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
     """
     Asynchronous Celery execution task for all PDF processing routines.
     """
+    # Validate before constructing paths or using the shared callback credential.
+    job_id = str(UUID(str(job_id)))
+    if callback_url:
+        expected_callback = f"{settings.API_GATEWAY_INTERNAL_URL.rstrip('/')}/api/v1/pdf/jobs/callback"
+        if not settings.API_GATEWAY_INTERNAL_URL or callback_url != expected_callback:
+            raise ValueError("Unapproved job callback URL")
     start_time = time.time()
-    work_dir = os.path.join(settings.TMP_STORAGE_DIR, job_id)
-    os.makedirs(work_dir, exist_ok=True)
+    os.makedirs(settings.TMP_STORAGE_DIR, exist_ok=True)
+    work_dir = tempfile.mkdtemp(prefix=f"{job_id}-", dir=settings.TMP_STORAGE_DIR)
     
     try:
         s3 = get_s3_client()
         input_paths = []
         for idx, f in enumerate(files):
-            file_id_clean = str(f.get("id", idx))[:8]
+            file_id_clean = str(UUID(str(f["id"])))[:8]
             raw_name = str(f.get("originalName", f"doc_{idx}.pdf"))
-            clean_name = os.path.basename(raw_name).replace("..", "").strip() or f"doc_{idx}.pdf"
+            clean_name = os.path.basename(raw_name.replace("\\", "/")).replace("..", "").strip() or f"doc_{idx}.pdf"
             local_filename = f"{idx}_{file_id_clean}_{clean_name}"
             local_path = os.path.join(work_dir, local_filename)
             s3_key = f.get("s3Key")
@@ -62,10 +73,10 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 try:
                     s3.download_file(settings.S3_BUCKET_NAME, s3_key, local_path)
                     downloaded = True
-                except Exception as s3_err:
-                    print(f"Could not download from S3 {s3_key}: {s3_err}")
+                except Exception:
+                    raise RuntimeError("Input document download failed") from None
             if not downloaded:
-                raise FileNotFoundError(f"Unable to download input file {s3_key or raw_name}")
+                raise FileNotFoundError("Input document could not be downloaded")
             input_paths.append(local_path)
             
         output_file_name = f"result_{job_id}.pdf"
@@ -208,12 +219,12 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
             else:
                 advanced_tools.repair_pdf(input_paths[0], output_path)
         else:
-            # Default copy
-            import shutil
-            shutil.copyfile(input_paths[0], output_path)
+            raise ValueError("Unsupported processing tool")
             
         duration_ms = int((time.time() - start_time) * 1000)
-        file_size_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 1024
+        if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError("Document processor did not produce an output")
+        file_size_bytes = os.path.getsize(output_path)
         output_s3_key = f"processed/{job_id}/{output_file_name}"
 
         # Upload output file to S3/MinIO
@@ -237,15 +248,14 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 output_s3_key,
                 ExtraArgs={"ContentType": content_type}
             )
-        except Exception as upload_err:
-            print(f"Failed to upload result to S3: {upload_err}")
+        except Exception:
+            raise RuntimeError("Result upload failed") from None
         
         # Notify API Gateway via callback
         if callback_url:
-            cb_url = callback_url.replace("http://localhost:4000", "http://api-gateway:4000").replace("http://127.0.0.1:4000", "http://api-gateway:4000")
             try:
                 httpx.post(
-                    cb_url,
+                    callback_url,
                     json={
                         "jobId": job_id,
                         "status": "COMPLETED",
@@ -255,9 +265,9 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                     },
                     headers={"x-pdfforge-worker-secret": settings.WORKER_CALLBACK_SECRET},
                     timeout=5.0
-                )
-            except Exception as cb_err:
-                print(f"Callback notification error: {cb_err}")
+                ).raise_for_status()
+            except Exception:
+                raise RuntimeError("Job completion callback failed") from None
                 
         return {
             "status": "COMPLETED",
@@ -269,14 +279,13 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
     except Exception as exc:
         duration_ms = int((time.time() - start_time) * 1000)
         if callback_url:
-            cb_url = callback_url.replace("http://localhost:4000", "http://api-gateway:4000")
             try:
                 httpx.post(
-                    cb_url,
+                    callback_url,
                     json={
                         "jobId": job_id,
                         "status": "FAILED",
-                        "errorMessage": str(exc),
+                        "errorMessage": "Document processing failed",
                         "durationMs": duration_ms
                     },
                     headers={"x-pdfforge-worker-secret": settings.WORKER_CALLBACK_SECRET},
@@ -284,7 +293,8 @@ def process_pdf_task(self, job_id: str, tool: str, files: list, parameters: dict
                 )
             except Exception:
                 pass
-        raise self.retry(exc=exc)
+        logger.warning("PDF processing failed (%s)", type(exc).__name__)
+        raise self.retry(exc=RuntimeError("Document processing failed"))
     finally:
         import shutil
         if os.path.isdir(work_dir):

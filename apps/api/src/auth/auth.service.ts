@@ -6,6 +6,7 @@ import {
   BadRequestException,
   OnModuleInit,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +15,8 @@ import * as crypto from 'crypto';
 import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../prisma/prisma.service';
+import { effectivePlan } from '../common/effective-plan';
+import { TOKEN_ISSUER, TOKEN_AUDIENCE, tokenVerificationOptions, validTokenClaims } from './token-policy';
 import {
   RegisterDto,
   LoginDto,
@@ -43,130 +46,64 @@ export class AuthService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    // Administrator provisioning is an explicit operator action, never a server startup side effect.
     this.initGoogleClient();
-    await this.ensureAdminAccount().catch((err) =>
-      this.logger.warn(`Admin account initialization warning: ${err.message}`),
-    );
   }
 
   private initGoogleClient() {
-    const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
-    const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET');
-    const callbackUrl = this.configService.get<string>(
-      'GOOGLE_CALLBACK_URL',
-      'http://localhost:4000/api/v1/auth/google/callback',
-    );
-    if (clientId) {
-      try {
-        this.googleClient = new OAuth2Client(clientId, clientSecret, callbackUrl);
-        this.logger.log(`Initialized Google OAuth 2.0 client (Client ID: ${clientId.substring(0, 10)}...)`);
-      } catch (err: any) {
-        this.logger.warn(`Failed to initialize Google OAuth2Client: ${err.message}`);
-      }
-    }
+    const clientId = this.getGoogleClientId();
+    if (clientId) this.googleClient = new OAuth2Client(clientId);
   }
 
   getGoogleClientId(): string | null {
-    return (
-      this.configService.get<string>('GOOGLE_CLIENT_ID') ||
-      process.env.GOOGLE_CLIENT_ID ||
-      'pdfforge-google-client-id.apps.googleusercontent.com'
-    );
+    const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID')?.trim();
+    return clientId && !clientId.startsWith('pdfforge-google-client-id') ? clientId : null;
   }
 
   getFrontendUrl(): string {
-    return this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+    return this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000').replace(/\/$/, '');
   }
 
-  async ensureAdminAccount() {
-    const adminEmail = (
-      this.configService.get<string>('ADMIN_EMAIL') ||
-      process.env.ADMIN_EMAIL ||
-      'admin@pdfforge.ai'
-    ).toLowerCase();
-    const adminPassword =
-      this.configService.get<string>('ADMIN_PASSWORD') ||
-      process.env.ADMIN_PASSWORD ||
-      'AdminPassword123!';
-    const adminName =
-      this.configService.get<string>('ADMIN_NAME') ||
-      process.env.ADMIN_NAME ||
-      'Global System Administrator';
+  private googleRedirectUri(requested?: string): string {
+    const callback = this.configService.get<string>('GOOGLE_CALLBACK_URL');
+    const allowed = [callback, this.getFrontendUrl() + '/auth/callback'].filter(Boolean);
+    const selected = requested || callback;
+    if (!selected || !allowed.includes(selected)) throw new BadRequestException('Unapproved OAuth redirect URI');
+    return selected;
+  }
 
+  async beginGoogleOAuth(redirectUri?: string, userId?: string) {
+    const clientId = this.getGoogleClientId();
+    if (!clientId) throw new ServiceUnavailableException('Google authentication is not configured');
+    if (userId) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId } });
+      if (!user || user.isBanned) throw new UnauthorizedException('Account unavailable');
+    }
+    const target = this.googleRedirectUri(redirectUri);
+    const state = crypto.randomBytes(32).toString('base64url');
+    const nonce = crypto.randomBytes(32).toString('base64url');
+    const cookie = await this.jwtService.signAsync(
+      { purpose: 'oauth_state', state, nonce, redirectUri: target, userId: userId || null },
+      { secret: this.configService.getOrThrow<string>('JWT_SECRET'), algorithm: 'HS256', issuer: TOKEN_ISSUER,
+        audience: 'pdfforge-oauth', expiresIn: '10m' },
+    );
+    const params = new URLSearchParams({ client_id: clientId, redirect_uri: target, response_type: 'code',
+      scope: 'openid email profile', prompt: 'select_account', state, nonce });
+    return { url: 'https://accounts.google.com/o/oauth2/v2/auth?' + params, clientId, cookie };
+  }
+
+  async validateGoogleOAuthState(state?: string, cookie?: string, redirectUri?: string, userId?: string) {
     try {
-      const existingAdmin = await this.prisma.user.findUnique({
-        where: { email: adminEmail },
-      });
-
-      if (!existingAdmin) {
-        const salt = await bcrypt.genSalt(12);
-        const passwordHash = await bcrypt.hash(adminPassword, salt);
-        const admin = await this.prisma.user.create({
-          data: {
-            email: adminEmail,
-            passwordHash,
-            name: adminName,
-            globalRole: 'SUPERADMIN',
-            plan: 'ENTERPRISE',
-            isEmailVerified: true,
-            isBanned: false,
-          },
-        });
-
-        const orgSlug = `${adminEmail.split('@')[0]}-admin-workspace`;
-        const org = await this.prisma.organization.upsert({
-          where: { slug: orgSlug },
-          update: { ownerId: admin.id },
-          create: {
-            name: `${adminName}'s Workspace`,
-            slug: orgSlug,
-            ownerId: admin.id,
-            plan: 'ENTERPRISE',
-            storageLimitBytes: BigInt(107374182400),
-          },
-        });
-
-        await this.prisma.organizationMember.upsert({
-          where: {
-            orgId_userId: {
-              orgId: org.id,
-              userId: admin.id,
-            },
-          },
-          update: { role: 'OWNER' },
-          create: {
-            orgId: org.id,
-            userId: admin.id,
-            role: 'OWNER',
-          },
-        });
-
-        this.logger.log(`Provisioned default enterprise admin account: ${adminEmail} (SUPERADMIN)`);
-      } else {
-        let needsUpdate = false;
-        const updateData: any = {};
-        if (existingAdmin.globalRole !== 'SUPERADMIN' && existingAdmin.globalRole !== 'ADMIN') {
-          updateData.globalRole = 'SUPERADMIN';
-          needsUpdate = true;
-        }
-        if (existingAdmin.isBanned) {
-          updateData.isBanned = false;
-          needsUpdate = true;
-        }
-        if (!existingAdmin.isEmailVerified) {
-          updateData.isEmailVerified = true;
-          needsUpdate = true;
-        }
-        if (needsUpdate) {
-          await this.prisma.user.update({
-            where: { id: existingAdmin.id },
-            data: updateData,
-          });
-          this.logger.log(`Upgraded default enterprise admin account: ${adminEmail}`);
-        }
-      }
-    } catch (err: any) {
-      this.logger.warn(`Deferred admin account check: ${err?.message || err}`);
+      if (!state || !cookie) throw new Error();
+      const payload = await this.jwtService.verifyAsync(cookie, tokenVerificationOptions(this.configService, 'oauth_state'));
+      if (payload.purpose !== 'oauth_state' || typeof payload.state !== 'string' || !payload.nonce
+        || payload.state.length !== state.length
+        || !crypto.timingSafeEqual(Buffer.from(payload.state), Buffer.from(state))
+        || payload.redirectUri !== this.googleRedirectUri(redirectUri)
+        || (payload.userId || null) !== (userId || null)) throw new Error();
+      return payload as { nonce: string; redirectUri: string; userId: string | null };
+    } catch {
+      throw new UnauthorizedException('Invalid or expired OAuth state');
     }
   }
 
@@ -236,6 +173,7 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (user.twoFactorEnabled) throw new UnauthorizedException('Two-factor authentication is currently unavailable; contact support');
     if (user.isBanned) {
       throw new UnauthorizedException(`Account suspended: ${user.banReason || 'Please contact customer support.'}`);
     }
@@ -280,113 +218,38 @@ export class AuthService implements OnModuleInit {
   // GOOGLE OAUTH 2.0 AUTHENTICATION & ACCOUNT LINKING
   // ============================================================================
 
-  getGoogleAuthUrl(state?: string, redirectUri?: string): string {
-    const clientId =
-      this.configService.get<string>('GOOGLE_CLIENT_ID') ||
-      process.env.GOOGLE_CLIENT_ID ||
-      'pdfforge-google-client-id.apps.googleusercontent.com';
-
-    const defaultCallback = this.configService.get<string>(
-      'GOOGLE_CALLBACK_URL',
-      'http://localhost:4000/api/v1/auth/google/callback',
-    );
-    const targetRedirectUri = redirectUri || defaultCallback;
-    const csrfState = state || crypto.randomBytes(16).toString('hex');
-
-    const params = new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: targetRedirectUri,
-      response_type: 'code',
-      scope: 'openid email profile',
-      access_type: 'offline',
-      prompt: 'select_account',
-      state: csrfState,
-    });
-
-    return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-  }
-
-  async verifyGoogleToken(idToken: string): Promise<GoogleVerifiedPayload> {
-    if (!idToken || typeof idToken !== 'string') {
+  async verifyGoogleToken(idToken: string, expectedNonce?: string): Promise<GoogleVerifiedPayload> {
+    if (!idToken || typeof idToken !== 'string' || !idToken.trim()) {
       throw new BadRequestException('Google ID token is required');
     }
-
-    const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
-
-    // 1. Google OAuth2Client Cryptographic Verification
-    if (this.googleClient && clientId) {
-      try {
-        const ticket = await this.googleClient.verifyIdToken({
-          idToken,
-          audience: clientId,
-        });
-        const payload = ticket.getPayload();
-        if (payload && payload.sub && payload.email) {
-          return {
-            googleId: payload.sub,
-            email: payload.email.toLowerCase(),
-            emailVerified: payload.email_verified ?? true,
-            name: payload.name || payload.email.split('@')[0],
-            picture: payload.picture,
-          };
-        }
-      } catch (err: any) {
-        this.logger.warn(`Google verifyIdToken error: ${err.message}`);
-      }
+    const token = idToken.trim();
+    if (token.startsWith('ya29.') || /^bearer /i.test(token) || token.split('.').length !== 3) {
+      throw new BadRequestException('A Google ID token (JWT) is required, not an OAuth access token');
     }
-
-    // 2. Direct cryptographic token verification with Google's public tokeninfo endpoint
+    const clientId = this.getGoogleClientId();
+    if (!clientId) throw new ServiceUnavailableException('Google authentication is not configured');
     try {
-      const res = await axios.get(
-        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
-        { timeout: 5000 },
-      );
-      const data = res.data;
-      if (data && data.sub && data.email) {
-        if (clientId && data.aud && data.aud !== clientId) {
-          throw new UnauthorizedException('Google ID token was issued for a different client application');
-        }
-        return {
-          googleId: data.sub,
-          email: data.email.toLowerCase(),
-          emailVerified: data.email_verified === 'true' || data.email_verified === true,
-          name: data.name || data.email.split('@')[0],
-          picture: data.picture,
-        };
-      }
-    } catch (err: any) {
-      if (err instanceof UnauthorizedException) throw err;
-      this.logger.error(`Google tokeninfo verification rejected token: ${err?.response?.data?.error_description || err.message}`);
+      const header = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'));
+      if (header?.alg !== 'RS256') throw new Error();
+      // Verify with Google's certificates; decoded claims and environment flags never authenticate users.
+      const client = this.googleClient || new OAuth2Client(clientId);
+      const ticket = await client.verifyIdToken({ idToken: token, audience: clientId });
+      const payload = ticket.getPayload();
+      if (!payload || !['accounts.google.com', 'https://accounts.google.com'].includes(payload.iss)
+        || payload.aud !== clientId || (payload.azp && payload.azp !== clientId)
+        || typeof payload.sub !== 'string' || !payload.sub || typeof payload.email !== 'string' || !payload.email
+        || payload.email_verified !== true || !Number.isFinite(payload.exp) || payload.exp <= Date.now() / 1000
+        || (expectedNonce && (payload as any).nonce !== expectedNonce)) throw new Error();
+      return { googleId: payload.sub, email: payload.email.toLowerCase(), emailVerified: true,
+        name: payload.name || payload.email.split('@')[0], picture: payload.picture };
+    } catch {
+      // External errors may contain credentials or exchange requests. Do not log them.
+      throw new UnauthorizedException('Invalid, untrusted, or expired Google identity token');
     }
-
-    // 3. For automated unit testing / CI test token support
-    if (
-      process.env.NODE_ENV === 'test' ||
-      idToken.startsWith('test_google_token_')
-    ) {
-      try {
-        const parts = idToken.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-          if (payload.sub && payload.email) {
-            return {
-              googleId: payload.sub,
-              email: payload.email.toLowerCase(),
-              emailVerified: payload.email_verified ?? true,
-              name: payload.name || payload.email.split('@')[0],
-              picture: payload.picture,
-            };
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    throw new UnauthorizedException('Invalid, untrusted, or expired Google identity token');
   }
 
-  async exchangeGoogleCode(code: string, redirectUri?: string): Promise<GoogleVerifiedPayload> {
+  async exchangeGoogleCode(code: string, redirectUri?: string, expectedNonce?: string): Promise<GoogleVerifiedPayload> {
+    if (!expectedNonce) throw new UnauthorizedException('A state-bound OAuth flow is required');
     const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
     const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET');
 
@@ -398,7 +261,7 @@ export class AuthService implements OnModuleInit {
       'GOOGLE_CALLBACK_URL',
       'http://localhost:4000/api/v1/auth/google/callback',
     );
-    const targetRedirectUri = redirectUri || defaultCallback;
+    const targetRedirectUri = this.googleRedirectUri(redirectUri || defaultCallback);
 
     try {
       const tokenRes = await axios.post(
@@ -416,30 +279,9 @@ export class AuthService implements OnModuleInit {
         },
       );
 
-      const { id_token, access_token } = tokenRes.data;
-      if (id_token) {
-        return this.verifyGoogleToken(id_token);
-      }
-
-      if (access_token) {
-        const userInfoRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${access_token}` },
-          timeout: 5000,
-        });
-        const data = userInfoRes.data;
-        if (!data || !data.sub || !data.email) {
-          throw new UnauthorizedException('Incomplete Google profile returned');
-        }
-        return {
-          googleId: data.sub,
-          email: data.email.toLowerCase(),
-          emailVerified: data.email_verified ?? true,
-          name: data.name,
-          picture: data.picture,
-        };
-      }
-    } catch (err: any) {
-      this.logger.error(`Google authorization code exchange failed: ${err?.response?.data?.error || err.message}`);
+      if (!tokenRes.data?.id_token) throw new UnauthorizedException('Google identity token missing');
+      return await this.verifyGoogleToken(tokenRes.data.id_token, expectedNonce);
+    } catch {
       throw new UnauthorizedException('Failed to exchange Google authorization code');
     }
 
@@ -447,17 +289,25 @@ export class AuthService implements OnModuleInit {
   }
 
   async googleAuth(
-    credentialOrCode: { idToken?: string; code?: string; redirectUri?: string },
+    credentialOrCode: { idToken?: string; code?: string; accessToken?: string; redirectUri?: string; nonce?: string },
     ipAddress = '127.0.0.1',
     userAgent = 'Web Browser',
   ) {
+    if (credentialOrCode.accessToken) {
+      this.logger.warn('Google authentication rejected: Provided credential is an OAuth access token, not an ID token.');
+      throw new BadRequestException(
+        'An OAuth access token was provided where a Google ID token (JWT) is required. Please provide a valid Google identity token (credential).',
+      );
+    }
+
     let googleUser: GoogleVerifiedPayload;
 
     if (credentialOrCode.code) {
-      googleUser = await this.exchangeGoogleCode(credentialOrCode.code, credentialOrCode.redirectUri);
+      googleUser = await this.exchangeGoogleCode(credentialOrCode.code, credentialOrCode.redirectUri, credentialOrCode.nonce);
     } else if (credentialOrCode.idToken) {
       googleUser = await this.verifyGoogleToken(credentialOrCode.idToken);
     } else {
+      this.logger.warn('Google authentication rejected: Neither idToken nor code was provided');
       throw new BadRequestException('Either idToken or code must be provided for Google authentication');
     }
 
@@ -498,18 +348,8 @@ export class AuthService implements OnModuleInit {
       });
 
       if (existingUserByEmail) {
-        // Safe Account Linking
-        user = await this.prisma.user.update({
-          where: { id: existingUserByEmail.id },
-          data: {
-            googleId,
-            provider: existingUserByEmail.provider === 'LOCAL' ? 'GOOGLE_AND_LOCAL' : 'GOOGLE',
-            isEmailVerified: true,
-            avatarUrl: existingUserByEmail.avatarUrl || picture,
-            name: existingUserByEmail.name || name,
-          },
-        });
-        this.logger.log(`Linked Google account (${googleId}) to existing user ${user.id} (${email})`);
+        // Link only from an authenticated account; matching email alone is insufficient proof of account ownership.
+        throw new UnauthorizedException('Sign in to your existing account and connect Google from account settings');
       } else {
         // 3. New User Registration via Google
         user = await this.prisma.user.create({
@@ -547,6 +387,7 @@ export class AuthService implements OnModuleInit {
       }
     }
 
+    if (user.twoFactorEnabled) throw new UnauthorizedException('Two-factor authentication is currently unavailable; contact support');
     if (user.isBanned) {
       throw new UnauthorizedException(`Account suspended: ${user.banReason || 'Please contact customer support.'}`);
     }
@@ -584,60 +425,8 @@ export class AuthService implements OnModuleInit {
     };
   }
 
-  async githubAuth(codeOrToken: string) {
-    let email = '';
-    let name = 'GitHub Developer';
-    try {
-      const parts = codeOrToken.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
-        if (payload.email) email = payload.email.toLowerCase();
-        if (payload.name) name = payload.name;
-      }
-    } catch {
-      // Fallback
-    }
-
-    if (!email) {
-      email = `github_${crypto.randomBytes(4).toString('hex')}@github.com`;
-    }
-
-    let user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email,
-          name,
-          isEmailVerified: true,
-          plan: 'FREE',
-          globalRole: 'USER',
-          provider: 'GITHUB',
-        },
-      });
-
-      await this.prisma.organization.create({
-        data: {
-          name: `${user.name || 'Personal'}'s Workspace`,
-          slug: `${user.email.split('@')[0]}-workspace-${Math.random().toString(36).substring(2, 6)}`,
-          ownerId: user.id,
-          plan: 'FREE',
-        },
-      });
-    }
-
-    const tokens = await this.generateTokens(user.id, user.email, user.globalRole);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
-
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.globalRole,
-        plan: user.plan,
-      },
-      tokens,
-    };
+  async githubAuth(_codeOrToken: string): Promise<never> {
+    throw new ServiceUnavailableException('GitHub authentication is disabled until verified OAuth is configured');
   }
 
   async forgotPassword(email: string) {
@@ -655,7 +444,7 @@ export class AuthService implements OnModuleInit {
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        passwordResetToken: resetToken,
+        passwordResetToken: crypto.createHash('sha256').update(resetToken).digest('hex'),
         passwordResetExpiresAt: resetExpires,
       },
     });
@@ -663,14 +452,13 @@ export class AuthService implements OnModuleInit {
     return {
       success: true,
       message: 'If that email address is registered, password reset instructions have been sent.',
-      resetToken, // Provided for test execution & environments
     };
   }
 
   async resetPassword(token: string, newPassword: string) {
     const user = await this.prisma.user.findFirst({
       where: {
-        passwordResetToken: token,
+        passwordResetToken: crypto.createHash('sha256').update(token).digest('hex'),
         passwordResetExpiresAt: { gt: new Date() },
       },
     });
@@ -682,8 +470,9 @@ export class AuthService implements OnModuleInit {
     const salt = await bcrypt.genSalt(12);
     const passwordHash = await bcrypt.hash(newPassword, salt);
 
-    await this.prisma.user.update({
-      where: { id: user.id },
+    const changed = await this.prisma.user.updateMany({
+      where: { id: user.id, passwordResetToken: crypto.createHash('sha256').update(token).digest('hex'),
+        passwordResetExpiresAt: { gt: new Date() } },
       data: {
         passwordHash,
         passwordResetToken: null,
@@ -692,59 +481,21 @@ export class AuthService implements OnModuleInit {
       },
     });
 
+    if (changed.count !== 1) throw new BadRequestException('Password reset token is invalid or has expired');
+
     return { success: true, message: 'Password has been successfully updated. You may now log in.' };
   }
 
-  async verifyEmail(token: string) {
-    const secret = this.configService.get<string>('JWT_SECRET', 'pdfforge-enterprise-jwt-super-secret-key-2026');
-    let payload: any;
-    try {
-      payload = await this.jwtService.verifyAsync(token, { secret });
-    } catch {
-      throw new BadRequestException('Invalid or expired email verification token');
-    }
-
-    await this.prisma.user.update({
-      where: { id: payload.sub },
-      data: { isEmailVerified: true },
-    });
-
-    return { success: true, message: 'Email address successfully verified.' };
+  async verifyEmail(_token: string): Promise<never> {
+    throw new ServiceUnavailableException('Email verification is disabled until verified email delivery is configured');
   }
 
-  async generate2FaSecret(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    const secret = crypto.randomBytes(20).toString('hex');
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { twoFactorSecret: secret },
-    });
-
-    const otpauthUrl = `otpauth://totp/PDFForge:${encodeURIComponent(user.email)}?secret=${secret}&issuer=PDFForge%20AI`;
-    return {
-      secret,
-      otpauthUrl,
-      message: 'Scan the QR code or enter the secret in Google Authenticator or 1Password.',
-    };
+  async generate2FaSecret(_userId: string): Promise<never> {
+    throw new ServiceUnavailableException('Two-factor setup is disabled until TOTP verification is implemented');
   }
 
-  async verify2Fa(userId: string, code: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.twoFactorSecret) {
-      throw new BadRequestException('2FA setup not initiated');
-    }
-
-    if (code.length === 6 && /^\d+$/.test(code)) {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { twoFactorEnabled: true },
-      });
-      return { success: true, message: 'Two-Factor Authentication successfully enabled.' };
-    }
-
-    throw new BadRequestException('Invalid 2FA verification code');
+  async verify2Fa(_userId: string, _code: string): Promise<never> {
+    throw new ServiceUnavailableException('Two-factor setup is disabled until TOTP verification is implemented');
   }
 
   async createApiKey(userId: string, dto: CreateApiKeyDto) {
@@ -800,78 +551,48 @@ export class AuthService implements OnModuleInit {
     return { success: true, message: 'API key revoked successfully' };
   }
 
-  async refreshTokens(rawRefreshTokenOrUserId: string, explicitRawToken?: string) {
-    let userId: string;
-    let refreshToken: string;
-
-    const refreshSecret = this.configService.get<string>(
-      'JWT_REFRESH_SECRET',
-      'pdfforge-enterprise-refresh-secret-key-2026',
-    );
-
-    if (explicitRawToken) {
-      userId = rawRefreshTokenOrUserId;
-      refreshToken = explicitRawToken;
-    } else {
-      refreshToken = rawRefreshTokenOrUserId;
-      try {
-        const payload = await this.jwtService.verifyAsync(refreshToken, {
-          secret: refreshSecret,
-        });
-        userId = payload.sub;
-      } catch {
-        throw new UnauthorizedException('Invalid or expired refresh token');
-      }
+  async refreshTokens(refreshToken: string) {
+    let payload: any;
+    try {
+      payload = await this.jwtService.verifyAsync(refreshToken, tokenVerificationOptions(this.configService, 'refresh'));
+      if (!validTokenClaims(payload, 'refresh')) throw new Error();
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
-
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.refreshTokenHash) {
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || user.isBanned || user.twoFactorEnabled || !user.refreshTokenHash) {
       throw new UnauthorizedException('Access denied - session invalidated');
     }
-
     const preHashed = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const matches = await bcrypt.compare(preHashed, user.refreshTokenHash);
-    if (!matches) {
-      // Possible reuse attack detected: invalidate refresh token
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { refreshTokenHash: null },
-      });
-      throw new UnauthorizedException('Refresh token reuse detected. Please log in again.');
+    if (!(await bcrypt.compare(preHashed, user.refreshTokenHash))) {
+      throw new UnauthorizedException('Refresh token has already been used or revoked');
     }
-
-    // Refresh token rotation
     const tokens = await this.generateTokens(user.id, user.email, user.globalRole);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
+    const nextHash = await this.hashRefreshToken(tokens.refreshToken);
+    // Only one concurrent request can consume the stored refresh credential.
+    const claimed = await this.prisma.user.updateMany({
+      where: { id: user.id, refreshTokenHash: user.refreshTokenHash, isBanned: false, twoFactorEnabled: false },
+      data: { refreshTokenHash: nextHash },
+    });
+    if (claimed.count !== 1) throw new UnauthorizedException('Refresh token has already been used or revoked');
     return tokens;
   }
 
   async logout(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshTokenHash: null },
-    });
+    await this.prisma.user.updateMany({ where: { id: userId }, data: { refreshTokenHash: null } });
     return { success: true, message: 'Logged out successfully' };
   }
 
   async logoutByToken(refreshToken: string) {
-    const refreshSecret = this.configService.get<string>(
-      'JWT_REFRESH_SECRET',
-      'pdfforge-enterprise-refresh-secret-key-2026',
-    );
     try {
-      const payload = await this.jwtService.verifyAsync(refreshToken, {
-        secret: refreshSecret,
-      });
-      if (payload && payload.sub) {
-        await this.prisma.user.update({
-          where: { id: payload.sub },
-          data: { refreshTokenHash: null },
-        });
+      const payload = await this.jwtService.verifyAsync(refreshToken, tokenVerificationOptions(this.configService, 'refresh'));
+      if (!validTokenClaims(payload, 'refresh')) throw new Error();
+      const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+      const preHashed = crypto.createHash('sha256').update(refreshToken).digest('hex');
+      if (user?.refreshTokenHash && await bcrypt.compare(preHashed, user.refreshTokenHash)) {
+        await this.prisma.user.updateMany({ where: { id: user.id, refreshTokenHash: user.refreshTokenHash }, data: { refreshTokenHash: null } });
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* Logout is intentionally idempotent. */ }
     return { success: true, message: 'Logged out successfully' };
   }
 
@@ -887,12 +608,13 @@ export class AuthService implements OnModuleInit {
       },
     });
 
-    if (!user) {
+    if (!user || user.isBanned) {
       throw new NotFoundException('User profile not found');
     }
 
-    const { passwordHash, refreshTokenHash, twoFactorSecret, ...profile } = user;
-    return profile;
+    const { passwordHash, refreshTokenHash, twoFactorSecret, passwordResetToken, passwordResetExpiresAt,
+      emailVerificationToken, emailVerificationExpiresAt, ...profile } = user;
+    return { ...profile, plan: await effectivePlan(this.prisma, user) };
   }
 
   async getSessions(userId: string) {
@@ -910,10 +632,12 @@ export class AuthService implements OnModuleInit {
   }
 
   async revokeSession(userId: string, sessionId: string) {
-    await this.prisma.userSession.updateMany({
+    const revoked = await this.prisma.userSession.updateMany({
       where: { id: sessionId, userId },
       data: { isRevoked: true },
     });
+    // Refresh credentials are currently stored once per account. Revoking a device therefore invalidates account refresh.
+    if (revoked.count > 0) await this.logout(userId);
     return { success: true, message: 'Session revoked successfully' };
   }
 
@@ -922,6 +646,7 @@ export class AuthService implements OnModuleInit {
       where: { userId },
       data: { isRevoked: true },
     });
+    await this.logout(userId);
     return { success: true, message: 'All active sessions revoked successfully' };
   }
 
@@ -945,7 +670,7 @@ export class AuthService implements OnModuleInit {
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    if (!user || user.isBanned) {
       throw new NotFoundException('User profile not found');
     }
     const updateData: any = {};
@@ -964,20 +689,20 @@ export class AuthService implements OnModuleInit {
       },
     });
 
-    const { passwordHash, refreshTokenHash, twoFactorSecret, ...profile } = updated;
+    const { passwordHash, refreshTokenHash, twoFactorSecret, passwordResetToken, passwordResetExpiresAt, ...profile } = updated;
     return profile;
   }
 
-  async connectGoogle(userId: string, dto: ConnectGoogleDto) {
+  async connectGoogle(userId: string, dto: ConnectGoogleDto, expectedNonce?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    if (!user || user.isBanned) {
       throw new NotFoundException('User profile not found');
     }
 
     let verifiedPayload: GoogleVerifiedPayload;
 
     if (dto.code) {
-      verifiedPayload = await this.exchangeGoogleCode(dto.code, dto.redirectUri);
+      verifiedPayload = await this.exchangeGoogleCode(dto.code, dto.redirectUri, expectedNonce);
     } else {
       const rawToken = dto.idToken || dto.credential;
       if (!rawToken) {
@@ -986,6 +711,7 @@ export class AuthService implements OnModuleInit {
       verifiedPayload = await this.verifyGoogleToken(rawToken);
     }
 
+    if (!verifiedPayload.emailVerified) throw new UnauthorizedException('Google email is not verified');
     const existingGoogleUser = await this.prisma.user.findUnique({
       where: { googleId: verifiedPayload.googleId },
     });
@@ -1003,13 +729,13 @@ export class AuthService implements OnModuleInit {
       },
     });
 
-    const { passwordHash, refreshTokenHash, twoFactorSecret, ...profile } = updated;
+    const { passwordHash, refreshTokenHash, twoFactorSecret, passwordResetToken, passwordResetExpiresAt, ...profile } = updated;
     return { success: true, message: 'Google account linked successfully', user: profile };
   }
 
   async disconnectGoogle(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    if (!user || user.isBanned) {
       throw new NotFoundException('User profile not found');
     }
     if (!user.googleId) {
@@ -1027,7 +753,7 @@ export class AuthService implements OnModuleInit {
       },
     });
 
-    const { passwordHash, refreshTokenHash, twoFactorSecret, ...profile } = updated;
+    const { passwordHash, refreshTokenHash, twoFactorSecret, passwordResetToken, passwordResetExpiresAt, ...profile } = updated;
     return { success: true, message: 'Google account disconnected successfully', user: profile };
   }
 
@@ -1036,7 +762,7 @@ export class AuthService implements OnModuleInit {
       throw new BadRequestException('Must provide exact confirmation string "DELETE"');
     }
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    if (!user || user.isBanned) {
       throw new NotFoundException('User profile not found');
     }
     if (user.passwordHash) {
@@ -1080,41 +806,22 @@ export class AuthService implements OnModuleInit {
   }
 
   private async generateTokens(userId: string, email: string, role: string) {
-    const jwtSecret = this.configService.get<string>(
-      'JWT_SECRET',
-      'pdfforge-enterprise-jwt-super-secret-key-2026',
-    );
-    const refreshSecret = this.configService.get<string>(
-      'JWT_REFRESH_SECRET',
-      'pdfforge-enterprise-refresh-secret-key-2026',
-    );
-
+    const claims = { sub: userId, email, role };
+    const options = { algorithm: 'HS256' as const, issuer: TOKEN_ISSUER, audience: TOKEN_AUDIENCE };
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(
-        { sub: userId, email, role },
-        { secret: jwtSecret, expiresIn: '15m' },
-      ),
-      this.jwtService.signAsync(
-        { sub: userId, email, role, jti: crypto.randomUUID() },
-        { secret: refreshSecret, expiresIn: '7d' },
-      ),
+      this.jwtService.signAsync({ ...claims, purpose: 'access' }, {
+        ...options, secret: this.configService.getOrThrow<string>('JWT_SECRET'), expiresIn: '15m' }),
+      this.jwtService.signAsync({ ...claims, purpose: 'refresh', jti: crypto.randomUUID() }, {
+        ...options, secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'), expiresIn: '7d' }),
     ]);
+    return { accessToken, refreshToken, tokenType: 'Bearer', expiresInSeconds: 900 };
+  }
 
-    return {
-      accessToken,
-      refreshToken,
-      tokenType: 'Bearer',
-      expiresInSeconds: 900,
-    };
+  private async hashRefreshToken(refreshToken: string) {
+    return bcrypt.hash(crypto.createHash('sha256').update(refreshToken).digest('hex'), 10);
   }
 
   private async updateRefreshToken(userId: string, refreshToken: string) {
-    const preHashed = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const salt = await bcrypt.genSalt(10);
-    const hash = await bcrypt.hash(preHashed, salt);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshTokenHash: hash },
-    });
+    await this.prisma.user.update({ where: { id: userId }, data: { refreshTokenHash: await this.hashRefreshToken(refreshToken) } });
   }
 }
