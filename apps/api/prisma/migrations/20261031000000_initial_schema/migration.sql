@@ -1,4 +1,4 @@
-﻿-- CreateEnum
+-- CreateEnum
 CREATE TYPE "GlobalRole" AS ENUM ('USER', 'SUPPORT', 'ADMIN', 'SUPERADMIN');
 
 -- CreateEnum
