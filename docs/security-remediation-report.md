@@ -174,3 +174,20 @@ Historical admin capacity/queue/revenue placeholders are not operational monitor
 Lower-severity development advisories remain tracked. Hosted CI has not run because this task
 does not push. A fresh staging restore, external provider verification and an approved rollout
 are required before claiming production readiness.
+
+### Hosted CI on `staging` (2026-11-04, Claude)
+
+- Run #58 (`3e8ac90`): web `npm audit --audit-level=high` failed. `tinypool <=2.1.1` (via
+  `vitest@2`) had critical advisories GHSA-5gmw-xhrv-c9v3 and GHSA-85c8-ppgw-ccpr, along with
+  related vite/esbuild/@vitest/mocker advisories. The integration job's registry audit failed on
+  the same lockfile. Fixed in `75743fb` with `vitest@^5.1.0`, `vite@^6.4.0` and `@types/node@^22`.
+  These are dev-only and are not in the runtime image.
+- Run #59 (`75743fb`): both jobs failed at the web `npm ci`. The lockfile had been regenerated with
+  npm 11 and `--legacy-peer-deps`. npm 10 (bundled with Node 22, used by the CI runner and by
+  `node:22-alpine` in `apps/web/Dockerfile`) rejected it as out of sync (`picomatch@2.3.2 does not
+  satisfy picomatch@4.0.7`). Fix: the lockfile was repaired with npm 10 and strict peer resolution.
+  Only the `picomatch` nesting changed. Verified: clean `npm ci` passes on npm 10 and 11, 41 vitest
+  tests pass, `next build` is clean, web audit shows 0 vulnerabilities, and an isolated web Docker
+  build succeeds. Generate future lockfiles with Node 22 / npm 10.
+- Unchanged: the API has 23 low/moderate advisories, all dev-only (jest / `@nestjs/cli` chains).
+  They cannot be fixed without breaking downgrades and are below the CI `high` threshold.

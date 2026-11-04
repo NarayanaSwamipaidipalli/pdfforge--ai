@@ -1,5 +1,21 @@
 # Doxera — AI Handoff Document
 
+## Completed by Claude — 2026-11-04 (session 8)
+
+### CI workflow #59 fix: web lockfile out of sync under npm 10
+
+- **Failed:** both jobs. Application → "Frontend tests, build and audit" (`npm ci`). Integration →
+  `scripts/remediation/ci.mjs`, where the web image build runs `npm ci` on `node:22-alpine`.
+- **Root cause:** in session 7 the lockfile was regenerated with npm 11 and `--legacy-peer-deps`.
+  npm 10, which CI and the Docker image use, rejects it: `picomatch@2.3.2 does not satisfy 4.0.7`.
+- **Fix:** `apps/web/package-lock.json` was repaired with npm 10 and strict peer deps. Only the `picomatch` nesting changed.
+- **Verified:** `npm ci` passes on npm 10 and 11. vitest 41/41, `next build` clean,
+  `npm audit --audit-level=high` 0, and the isolated `docker build` of `apps/web` passed (image removed afterwards).
+- **Rule:** regenerate lockfiles with Node 22 / npm 10 and never with `--legacy-peer-deps`.
+- Not pushed. Hosted CI has not yet confirmed these results.
+
+---
+
 ## Completed by Claude — 2026-11-04 (session 7)
 
 ### Dependency vulnerability remediation — CI workflow #58
