@@ -178,7 +178,7 @@ export default function PricingPage() {
     setCheckoutLoading(true);
 
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
 
     try {
       const res = await fetch(`${API_V1}/billing/checkout`, {

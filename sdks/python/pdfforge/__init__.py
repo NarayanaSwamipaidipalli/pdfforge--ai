@@ -1,5 +1,5 @@
 """
-PDFForge AI Enterprise Python SDK
+Doxera Enterprise Document Intelligence Python SDK
 """
 
 from .client import PDFForgeClient

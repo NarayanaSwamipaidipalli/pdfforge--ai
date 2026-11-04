@@ -49,6 +49,43 @@ integration/performance, migration preservation and Render preparation work.
 - Existing credentials, records and volumes preserved; original four development container
   IDs/start times unchanged. No push, merge, deployment, domain purchase, DNS or secret change.
 
+2026-11-04 — Claude completed CI staging support and credential isolation audit (session 6).
+
+- Files: `.github/workflows/ci.yml` (added `staging` branch to push + PR triggers; added `npm test`
+  to frontend step), `docs/STAGING_READINESS.md` (gate #11 resolved, CI isolation analysis added,
+  remaining gates table updated), `AI_HANDOFF.md`.
+- Tests: 41 vitest + 166 jest = 207 all passed. Pre-push hook confirmed blocking (dry-run, exit 1).
+- Verified: CI uses `LOAD_LOCAL_ENV: 'false'` and dummy `DATABASE_URL`; all test suites use mocks;
+  no production credentials reachable from CI or vitest tests.
+- 12 of 20 GO/NO-GO gates now green; 8 require operator actions (Render dashboard, external services).
+- No push, deploy, production change, secret exposure or paid resource created.
+
+2026-11-04 — Claude completed pre-deployment release gate finalization (session 5).
+
+- Files: `docs/STAGING_READINESS.md` (rewrote with 20-gate GO/NO-GO checklist, Render dashboard
+  read-only verification, Blueprint cross-contamination proof, staging branch commands, CI gap,
+  external credentials, synthetic data policy), `docs/STAGING_SMOKE_TESTS.md` (new: health/auth/
+  upload/CORS/security-headers smoke tests, 5 rollback scenarios, pass/fail criteria), `AI_HANDOFF.md`.
+- Verified: pre-push hook blocks all pushes (exit 1). Blueprint `fromDatabase.name` is scoped to the
+  submitted Blueprint, not the account — production DB adoption is structurally impossible. All
+  `doxera-staging-*` service names are disjoint from all `pdfforge-*` production names.
+- Found: `.github/workflows/ci.yml` does not list `staging` in push triggers — documented as Codex task.
+- 9 of 20 GO/NO-GO gates remain unresolved (all require operator or Codex action).
+- No push, deploy, production change, secret exposure or paid resource created.
+
+2026-11-04 — Claude completed token migration, test infrastructure, and staging readiness audit.
+
+- Files: `apps/web/src/lib/token-migration.ts`, `auth-store.ts`, `api-client.ts`, `middleware.ts`,
+  all 15 web pages with `pdfforge_token` references, `render.staging.yaml`, `.env.staging.example`,
+  `docs/STAGING_READINESS.md`, `AI_HANDOFF.md`, vitest config and two test files.
+- Tests: 41 vitest (token migration × 20, middleware × 21) all passed; 166 API jest all passed;
+  `tsc --noEmit` 0 errors; `next build` clean. Worker/e2e tests require Docker (Codex scope).
+- Migration: `pdfforge_token` → `doxera_token` backward-compatible shim, Secure cookie attribute
+  on HTTPS, HttpOnly limitation documented, middleware accepts both keys during migration window.
+- Staging: Blueprint isolation verified locally. Fixed missing `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in
+  staging web service. Wrote full operator pre-flight checklist in `docs/STAGING_READINESS.md`.
+- No push, deploy, DNS change, domain purchase, secret change or production action occurred.
+
 ## Active work and blockers
 
 - Codex: local implementation/verification complete; current task files ready for handoff.

@@ -5,8 +5,13 @@ const PROTECTED_PREFIXES = ['/dashboard', '/account', '/settings', '/admin'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const token = request.cookies.get('pdfforge_token')?.value;
-  const refreshToken = request.cookies.get('pdfforge_refresh_token')?.value;
+  // Accept both new key (doxera_token) and legacy key (pdfforge_token) during migration window.
+  const token =
+    request.cookies.get('doxera_token')?.value ||
+    request.cookies.get('pdfforge_token')?.value;
+  const refreshToken =
+    request.cookies.get('doxera_refresh_token')?.value ||
+    request.cookies.get('pdfforge_refresh_token')?.value;
 
   const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 

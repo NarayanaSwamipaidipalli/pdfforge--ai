@@ -54,7 +54,7 @@ export default function OrganizationsPage() {
 
   const fetchOrganizations = async () => {
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
 
     if (!authToken) {
       setLoading(false);
@@ -94,7 +94,7 @@ export default function OrganizationsPage() {
     if (!orgName) return;
 
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {
@@ -123,7 +123,7 @@ export default function OrganizationsPage() {
     if (!inviteEmail || !activeOrg) return;
 
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     setIsInviting(true);
@@ -160,7 +160,7 @@ export default function OrganizationsPage() {
     if (!confirm('Are you sure you want to remove this member from the organization?')) return;
 
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {

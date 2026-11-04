@@ -137,7 +137,7 @@ export default function AdminPage() {
   const fetchAdminData = async () => {
     setLoading(true);
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
 
     if (!authToken) {
       setUnauthorized(true);
@@ -220,7 +220,7 @@ export default function AdminPage() {
 
   const handleUpdateRole = async (userId: string, newRole: string) => {
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {
@@ -244,7 +244,7 @@ export default function AdminPage() {
 
   const handleToggleBan = async (userId: string, currentlyBanned?: boolean) => {
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     const endpoint = currentlyBanned ? 'unban' : 'ban';
@@ -272,7 +272,7 @@ export default function AdminPage() {
 
   const handleRetryJob = async (jobId: string) => {
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {
@@ -293,7 +293,7 @@ export default function AdminPage() {
     e.preventDefault();
     if (!newCouponCode) return;
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {

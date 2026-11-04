@@ -1,22 +1,21 @@
 # Deployment is manual. Validate and review this Blueprint before applying it.
 # Existing schemas require the documented migration preflight; never reset a database.
+# These fields do not disable Blueprint Auto Sync in the dashboard. Keep pushes blocked
+# until both live service Auto-Deploy and Blueprint Auto Sync are confirmed off.
+previews:
+  generation: off
+
 envVarGroups:
   - name: pdfforge-shared
     envVars:
-      - key: WORKER_CALLBACK_SECRET
-        sync: false
       - key: AWS_REGION
         value: us-east-1
-      - key: S3_BUCKET_NAME
-        sync: false
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
-        sync: false
 
 services:
   - type: web
     name: pdfforge-web
+    branch: main
+    autoDeployTrigger: off
     # Proposed domains; apply only after ownership verification and rollout approval.
     domains: [doxera.in]
     runtime: docker
@@ -37,6 +36,8 @@ services:
 
   - type: web
     name: pdfforge-api
+    branch: main
+    autoDeployTrigger: off
     domains: [api.doxera.in]
     runtime: docker
     plan: 0.5c-512mb
@@ -46,8 +47,22 @@ services:
     healthCheckPath: /api/v1/health
     envVars:
       - fromGroup: pdfforge-shared
+      # Render ignores sync:false inside envVarGroups. Define inputs on the API,
+      # then reference these same values from both worker services.
+      - key: WORKER_CALLBACK_SECRET
+        sync: false
+      - key: S3_BUCKET_NAME
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
       - key: NODE_ENV
         value: production
+      - key: LOAD_LOCAL_ENV
+        value: 'false'
+      - key: S3_AUTO_CREATE_BUCKET
+        value: 'false'
       - key: PORT
         value: 4000
       - key: DATABASE_URL
@@ -102,6 +117,8 @@ services:
   # Same production Docker image supplies FastAPI and the separate Celery process.
   - type: web
     name: pdfforge-worker
+    branch: main
+    autoDeployTrigger: off
     runtime: docker
     plan: 1c-2g
     dockerContext: ./services/pdf-worker
@@ -109,6 +126,14 @@ services:
     healthCheckPath: /health
     envVars:
       - fromGroup: pdfforge-shared
+      - key: WORKER_CALLBACK_SECRET
+        fromService: {type: web, name: pdfforge-api, envVarKey: WORKER_CALLBACK_SECRET}
+      - key: S3_BUCKET_NAME
+        fromService: {type: web, name: pdfforge-api, envVarKey: S3_BUCKET_NAME}
+      - key: AWS_ACCESS_KEY_ID
+        fromService: {type: web, name: pdfforge-api, envVarKey: AWS_ACCESS_KEY_ID}
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService: {type: web, name: pdfforge-api, envVarKey: AWS_SECRET_ACCESS_KEY}
       - key: ENVIRONMENT
         value: production
       - key: PORT
@@ -136,6 +161,8 @@ services:
 
   - type: worker
     name: pdfforge-celery
+    branch: main
+    autoDeployTrigger: off
     runtime: docker
     plan: 1c-2g
     dockerContext: ./services/pdf-worker
@@ -143,6 +170,14 @@ services:
     dockerCommand: celery -A app.celery_app.celery_app worker --loglevel=warning --concurrency=2 --max-tasks-per-child=10
     envVars:
       - fromGroup: pdfforge-shared
+      - key: WORKER_CALLBACK_SECRET
+        fromService: {type: web, name: pdfforge-api, envVarKey: WORKER_CALLBACK_SECRET}
+      - key: S3_BUCKET_NAME
+        fromService: {type: web, name: pdfforge-api, envVarKey: S3_BUCKET_NAME}
+      - key: AWS_ACCESS_KEY_ID
+        fromService: {type: web, name: pdfforge-api, envVarKey: AWS_ACCESS_KEY_ID}
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService: {type: web, name: pdfforge-api, envVarKey: AWS_SECRET_ACCESS_KEY}
       - key: ENVIRONMENT
         value: production
       - key: API_GATEWAY_HOSTPORT

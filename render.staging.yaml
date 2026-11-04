@@ -1,0 +1,251 @@
+# Proposal only: no resources are provisioned by this file. Explicit approval required.
+# Use a separate Blueprint, branch staging, and disable dashboard Auto Sync before pushes.
+# Network isolation requires an eligible Render plan; do not remove it to bypass a plan gate.
+# Supply staging-only credentials. Custom domains are intentionally absent.
+# networking.isolation and permissions.protection require a Business/Enterprise plan.
+# They have been removed for Hobby plan compatibility. Add them back when upgrading.
+previews:
+  generation: 'off'
+projects:
+  - name: doxera-staging
+    environments:
+      - name: staging
+        envVarGroups:
+          - name: doxera-staging-shared
+            envVars:
+              - key: AWS_REGION
+                value: us-east-1
+        services:
+          - type: web
+            name: doxera-staging-web
+            branch: staging
+            autoDeployTrigger: 'off'
+            runtime: docker
+            plan: 0.5c-512mb
+            dockerContext: ./apps/web
+            dockerfilePath: ./apps/web/Dockerfile
+            healthCheckPath: /login
+            envVars:
+              - key: NEXT_PUBLIC_APP_URL
+                fromService:
+                  type: web
+                  name: doxera-staging-web
+                  envVarKey: RENDER_EXTERNAL_URL
+              - key: PORT
+                value: 3000
+              - key: API_GATEWAY_HOSTPORT
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  property: hostport
+              # Required for Google One-Tap GSI script; use a staging-only OAuth client.
+              - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+                sync: false
+            region: singapore
+          - type: web
+            name: doxera-staging-api
+            branch: staging
+            autoDeployTrigger: 'off'
+            runtime: docker
+            plan: 0.5c-512mb
+            dockerContext: ./apps/api
+            dockerfilePath: ./apps/api/Dockerfile
+            preDeployCommand: node node_modules/prisma/build/index.js migrate deploy
+            healthCheckPath: /api/v1/health
+            envVars:
+              - fromGroup: doxera-staging-shared
+              - key: WORKER_CALLBACK_SECRET
+                sync: false
+              - key: S3_BUCKET_NAME
+                sync: false
+              - key: AWS_ACCESS_KEY_ID
+                sync: false
+              - key: AWS_SECRET_ACCESS_KEY
+                sync: false
+              - key: NODE_ENV
+                value: production
+              - key: LOAD_LOCAL_ENV
+                value: 'false'
+              - key: S3_AUTO_CREATE_BUCKET
+                value: 'false'
+              - key: PORT
+                value: 4000
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: doxera-staging-postgres
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  type: keyvalue
+                  name: doxera-staging-redis
+                  property: connectionString
+              - key: PDF_WORKER_HOSTPORT
+                fromService:
+                  type: pserv
+                  name: doxera-staging-worker
+                  property: hostport
+              - key: API_GATEWAY_HOSTPORT
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  property: hostport
+              - key: FRONTEND_URL
+                fromService:
+                  type: web
+                  name: doxera-staging-web
+                  envVarKey: RENDER_EXTERNAL_URL
+              - key: CORS_ORIGINS
+                fromService:
+                  type: web
+                  name: doxera-staging-web
+                  envVarKey: RENDER_EXTERNAL_URL
+              - key: JWT_SECRET
+                sync: false
+              - key: JWT_REFRESH_SECRET
+                sync: false
+              - key: GOOGLE_CLIENT_ID
+                sync: false
+              - key: GOOGLE_CLIENT_SECRET
+                sync: false
+              - key: GOOGLE_CALLBACK_URL
+                sync: false
+              - key: MAIL_PROVIDER
+                value: resend
+              - key: RESEND_API_KEY
+                sync: false
+              - key: MAIL_FROM
+                sync: false
+              - key: SENTRY_DSN
+                sync: false
+              - key: ENABLE_STRIPE
+                value: 'false'
+              - key: ENABLE_RAZORPAY
+                value: 'false'
+              - key: ENABLE_PAYPAL
+                value: 'false'
+            region: singapore
+          - type: pserv
+            name: doxera-staging-worker
+            branch: staging
+            autoDeployTrigger: 'off'
+            runtime: docker
+            plan: 1c-2g
+            dockerContext: ./services/pdf-worker
+            dockerfilePath: ./services/pdf-worker/Dockerfile
+            envVars:
+              - fromGroup: doxera-staging-shared
+              - key: WORKER_CALLBACK_SECRET
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  envVarKey: WORKER_CALLBACK_SECRET
+              - key: S3_BUCKET_NAME
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  envVarKey: S3_BUCKET_NAME
+              - key: AWS_ACCESS_KEY_ID
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  envVarKey: AWS_ACCESS_KEY_ID
+              - key: AWS_SECRET_ACCESS_KEY
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  envVarKey: AWS_SECRET_ACCESS_KEY
+              - key: ENVIRONMENT
+                value: production
+              - key: PORT
+                value: 8000
+              - key: API_GATEWAY_HOSTPORT
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  property: hostport
+              - key: REDIS_URL
+                fromService:
+                  type: keyvalue
+                  name: doxera-staging-redis
+                  property: connectionString
+              - key: CELERY_BROKER_URL
+                fromService:
+                  type: keyvalue
+                  name: doxera-staging-redis
+                  property: connectionString
+              - key: CELERY_RESULT_BACKEND
+                fromService:
+                  type: keyvalue
+                  name: doxera-staging-redis
+                  property: connectionString
+            region: singapore
+          - type: worker
+            name: doxera-staging-celery
+            branch: staging
+            autoDeployTrigger: 'off'
+            runtime: docker
+            plan: 1c-2g
+            dockerContext: ./services/pdf-worker
+            dockerfilePath: ./services/pdf-worker/Dockerfile
+            dockerCommand: >-
+              celery -A app.celery_app.celery_app worker --loglevel=warning --concurrency=2
+              --max-tasks-per-child=10
+            envVars:
+              - fromGroup: doxera-staging-shared
+              - key: WORKER_CALLBACK_SECRET
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  envVarKey: WORKER_CALLBACK_SECRET
+              - key: S3_BUCKET_NAME
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  envVarKey: S3_BUCKET_NAME
+              - key: AWS_ACCESS_KEY_ID
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  envVarKey: AWS_ACCESS_KEY_ID
+              - key: AWS_SECRET_ACCESS_KEY
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  envVarKey: AWS_SECRET_ACCESS_KEY
+              - key: ENVIRONMENT
+                value: production
+              - key: API_GATEWAY_HOSTPORT
+                fromService:
+                  type: web
+                  name: doxera-staging-api
+                  property: hostport
+              - key: REDIS_URL
+                fromService:
+                  type: keyvalue
+                  name: doxera-staging-redis
+                  property: connectionString
+              - key: CELERY_BROKER_URL
+                fromService:
+                  type: keyvalue
+                  name: doxera-staging-redis
+                  property: connectionString
+              - key: CELERY_RESULT_BACKEND
+                fromService:
+                  type: keyvalue
+                  name: doxera-staging-redis
+                  property: connectionString
+            region: singapore
+          - type: keyvalue
+            name: doxera-staging-redis
+            plan: 256mb
+            ipAllowList: []
+            maxmemoryPolicy: noeviction
+            region: singapore
+        databases:
+          - name: doxera-staging-postgres
+            plan: basic-256mb
+            ipAllowList: []
+            postgresMajorVersion: '16'
+            databaseName: doxera_staging
+            user: doxera_staging
+            region: singapore

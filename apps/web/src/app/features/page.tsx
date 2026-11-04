@@ -30,13 +30,13 @@ export default function FeaturesPage() {
   });
 
   const comparisonRows = [
-    { feature: 'Core Conversion Tools (Merge, Split, Compress)', pdfforge: 'Unlimited (Pro)', adobe: 'Limited/Subscription', ilovepdf: 'Capped', smallpdf: 'Capped' },
-    { feature: 'AI RAG Document Chat & Exact Citations', pdfforge: 'Yes (On-Premise & Cloud)', adobe: 'Acrobat AI Add-on', ilovepdf: 'No', smallpdf: 'Basic' },
-    { feature: '100% Air-Gapped Zero-Cloud Egress Mode', pdfforge: 'Yes (Ollama / vLLM)', adobe: 'No', ilovepdf: 'No', smallpdf: 'No' },
-    { feature: 'DoD 5220.22-M 24h Cryptographic File Purge', pdfforge: 'Yes (Automatic)', adobe: 'Variable', ilovepdf: '2h Retained', smallpdf: '1h Retained' },
-    { feature: 'High-Throughput REST & GraphQL API', pdfforge: 'Yes (Dedicated Keys)', adobe: 'Adobe PDF Services API', ilovepdf: 'Limited', smallpdf: 'Limited' },
-    { feature: 'Searchable OCR (Multi-Language)', pdfforge: 'Tesseract & Ghostscript', adobe: 'Yes', ilovepdf: 'OCR Tier', smallpdf: 'Pro Only' },
-    { feature: 'Multi-Tenant Team Workspaces & RBAC', pdfforge: 'Included in Business', adobe: 'Enterprise Admin Console', ilovepdf: 'Team Plan', smallpdf: 'Team Plan' },
+    { feature: 'Core Conversion Tools (Merge, Split, Compress)', doxera: 'Unlimited (Pro)', adobe: 'Limited/Subscription', ilovepdf: 'Capped', smallpdf: 'Capped' },
+    { feature: 'AI RAG Document Chat & Exact Citations', doxera: 'Yes (On-Premise & Cloud)', adobe: 'Acrobat AI Add-on', ilovepdf: 'No', smallpdf: 'Basic' },
+    { feature: '100% Air-Gapped Zero-Cloud Egress Mode', doxera: 'Yes (Ollama / vLLM)', adobe: 'No', ilovepdf: 'No', smallpdf: 'No' },
+    { feature: 'DoD 5220.22-M 24h Cryptographic File Purge', doxera: 'Yes (Automatic)', adobe: 'Variable', ilovepdf: '2h Retained', smallpdf: '1h Retained' },
+    { feature: 'High-Throughput REST & GraphQL API', doxera: 'Yes (Dedicated Keys)', adobe: 'Adobe PDF Services API', ilovepdf: 'Limited', smallpdf: 'Limited' },
+    { feature: 'Searchable OCR (Multi-Language)', doxera: 'Tesseract & Ghostscript', adobe: 'Yes', ilovepdf: 'OCR Tier', smallpdf: 'Pro Only' },
+    { feature: 'Multi-Tenant Team Workspaces & RBAC', doxera: 'Included in Business', adobe: 'Enterprise Admin Console', ilovepdf: 'Team Plan', smallpdf: 'Team Plan' },
   ];
 
   return (
@@ -155,7 +155,7 @@ export default function FeaturesPage() {
                   <tr key={i} className="hover:bg-zinc-50/50">
                     <td className="py-3 px-4 font-medium text-zinc-900">{row.feature}</td>
                     <td className="py-3 px-4 font-semibold text-blue-600 bg-blue-50/30">
-                      {row.pdfforge}
+                      {row.doxera}
                     </td>
                     <td className="py-3 px-4 text-zinc-500">{row.adobe}</td>
                     <td className="py-3 px-4 text-zinc-500">{row.ilovepdf}</td>

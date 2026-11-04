@@ -5,14 +5,15 @@ const API_V1 = `${API_BASE}/api/v1`;
 export class ApiClient {
   private static getToken(): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem('pdfforge_token');
+    return localStorage.getItem('doxera_token');
   }
 
   private static setToken(token: string): void {
     if (typeof window === 'undefined') return;
-    localStorage.setItem('pdfforge_token', token);
+    localStorage.setItem('doxera_token', token);
     const expires = new Date(Date.now() + 7 * 864e5).toUTCString();
-    document.cookie = `pdfforge_token=${encodeURIComponent(token)}; expires=${expires}; path=/; SameSite=Lax`;
+    const secure = location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `doxera_token=${encodeURIComponent(token)}; expires=${expires}; path=/; SameSite=Lax${secure}`;
   }
 
   static async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {

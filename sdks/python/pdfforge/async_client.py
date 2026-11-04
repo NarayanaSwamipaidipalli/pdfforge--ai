@@ -101,7 +101,7 @@ class AsyncPDFForgeClient:
     def _get_headers(self) -> Dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "PDFForge-AsyncPythonSDK/1.0.0",
+            "User-Agent": "Doxera-AsyncPythonSDK/1.0.0",
         }
         if self.api_key:
             headers["X-API-Key"] = self.api_key

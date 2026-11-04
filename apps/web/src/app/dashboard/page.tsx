@@ -84,7 +84,7 @@ export default function DashboardPage() {
   const { user, token, isAuthenticated, isHydrated, syncProfile } = useAuthStore();
 
   useEffect(() => {
-    if (isHydrated && !isAuthenticated && !token && typeof window !== 'undefined' && !localStorage.getItem('pdfforge_token')) {
+    if (isHydrated && !isAuthenticated && !token && typeof window !== 'undefined' && !localStorage.getItem('doxera_token')) {
       router.push('/login?redirect=/dashboard');
     }
   }, [isHydrated, isAuthenticated, token, router]);
@@ -115,7 +115,7 @@ export default function DashboardPage() {
   const fetchDashboardData = async () => {
     setLoading(true);
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
 
     if (!authToken) {
       setLoading(false);
@@ -181,7 +181,7 @@ export default function DashboardPage() {
     if (!keyName) return;
 
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     setKeyGenerating(true);
@@ -215,7 +215,7 @@ export default function DashboardPage() {
     }
 
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {
@@ -233,7 +233,7 @@ export default function DashboardPage() {
 
   const handleRetryJob = async (jobId: string) => {
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {
@@ -253,7 +253,7 @@ export default function DashboardPage() {
     e.preventDefault();
     setPasswordMsg(null);
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {
@@ -281,7 +281,7 @@ export default function DashboardPage() {
 
   const handleRevokeSession = async (sessionId: string) => {
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {
@@ -327,7 +327,7 @@ export default function DashboardPage() {
     }
 
     const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {

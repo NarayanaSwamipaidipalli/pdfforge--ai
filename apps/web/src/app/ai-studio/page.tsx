@@ -74,7 +74,7 @@ export default function AiStudioPage() {
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const checksumSha256 = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 
-      const token = typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null;
+      const token = typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null;
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

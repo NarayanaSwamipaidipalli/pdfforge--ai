@@ -102,7 +102,7 @@ export default function AccountPage() {
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    const authToken = token || localStorage.getItem('pdfforge_token');
+    const authToken = token || localStorage.getItem('doxera_token');
     if (!authToken) return;
 
     setProfileSaving(true);
@@ -146,7 +146,7 @@ export default function AccountPage() {
       return;
     }
 
-    const authToken = token || localStorage.getItem('pdfforge_token');
+    const authToken = token || localStorage.getItem('doxera_token');
     if (!authToken) return;
 
     setPasswordSaving(true);
@@ -181,7 +181,7 @@ export default function AccountPage() {
       return;
     }
 
-    const authToken = token || localStorage.getItem('pdfforge_token');
+    const authToken = token || localStorage.getItem('doxera_token');
     if (!authToken) return;
 
     setGoogleActionLoading(true);
@@ -215,7 +215,7 @@ export default function AccountPage() {
       const data = await res.json();
 
       if (res.ok && data.url) {
-        sessionStorage.setItem('pdfforge_google_link_state', new URL(data.url).searchParams.get('state') || '');
+        sessionStorage.setItem('doxera_google_link_state', new URL(data.url).searchParams.get('state') || '');
         window.location.href = data.url;
       } else {
         throw new Error('Google authorization URL unavailable');
@@ -233,7 +233,7 @@ export default function AccountPage() {
       return;
     }
 
-    const authToken = token || localStorage.getItem('pdfforge_token');
+    const authToken = token || localStorage.getItem('doxera_token');
     if (!authToken) return;
 
     setDeleteLoading(true);

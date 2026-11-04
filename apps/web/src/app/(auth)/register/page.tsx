@@ -51,7 +51,7 @@ function RegisterForm() {
         const isRealClientId =
           clientId &&
           clientId.includes('.apps.googleusercontent.com') &&
-          !clientId.startsWith('pdfforge-google-client-id');
+          !clientId.startsWith('doxera-google-client-id');
         if (!isRealClientId || typeof window === 'undefined' || !isMounted) return;
 
         if (!document.getElementById('google-gsi-script')) {

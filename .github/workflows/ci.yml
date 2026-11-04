@@ -2,9 +2,9 @@ name: Doxera security and integration
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
   workflow_dispatch:
 
 permissions:
@@ -40,10 +40,11 @@ jobs:
           npm test -- --runInBand
           npm run build
           npm audit --audit-level=high
-      - name: Frontend build and audit
+      - name: Frontend tests, build and audit
         working-directory: apps/web
         run: |
           npm ci --no-audit --no-fund
+          npm test
           npm run build
           npm audit --audit-level=high
       - name: Proxy, redirect and Compose helper regressions

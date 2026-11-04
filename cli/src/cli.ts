@@ -39,7 +39,7 @@ function getAuthHeaders(cmdOptions: any): Record<string, string> {
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'User-Agent': 'PDFForge-CLI/1.0.0',
+    'User-Agent': 'Doxera-CLI/1.0.0',
   };
 
   if (apiKey) {
@@ -143,7 +143,7 @@ async function dispatchAndPollJob(
 
 program
   .name('pdfforge')
-  .description('PDFForge AI – Enterprise PDF Intelligence Platform Command Line Interface')
+  .description('Doxera – Enterprise Document Intelligence Platform Command Line Interface')
   .version('1.0.0');
 
 // ==========================================
@@ -152,7 +152,7 @@ program
 
 program
   .command('login')
-  .description('Authenticate with PDFForge AI API using email and password')
+  .description('Authenticate with Doxera API using email and password')
   .requiredOption('-e, --email <email>', 'User account email')
   .requiredOption('-p, --password <password>', 'User account password')
   .option('--endpoint <url>', 'API Endpoint URL')

@@ -40,7 +40,7 @@ export default function SettingsPage() {
   const { user, token, isAuthenticated, isHydrated, syncProfile, logout } = useAuthStore();
 
   useEffect(() => {
-    if (isHydrated && !isAuthenticated && !token && typeof window !== 'undefined' && !localStorage.getItem('pdfforge_token')) {
+    if (isHydrated && !isAuthenticated && !token && typeof window !== 'undefined' && !localStorage.getItem('doxera_token')) {
       router.push('/login?redirect=/settings');
     }
   }, [isHydrated, isAuthenticated, token, router]);
@@ -70,7 +70,7 @@ export default function SettingsPage() {
   const [notifyWeeklyDigest, setNotifyWeeklyDigest] = useState(false);
 
   const fetchSettingsData = async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     try {
@@ -97,7 +97,7 @@ export default function SettingsPage() {
 
   // Handle 2FA Generation
   const handleStart2Fa = async () => {
-    const authToken = token || localStorage.getItem('pdfforge_token');
+    const authToken = token || localStorage.getItem('doxera_token');
     if (!authToken) return;
 
     setTwoFaLoading(true);
@@ -123,7 +123,7 @@ export default function SettingsPage() {
   // Handle 2FA Verification
   const handleVerify2Fa = async (e: React.FormEvent) => {
     e.preventDefault();
-    const authToken = token || localStorage.getItem('pdfforge_token');
+    const authToken = token || localStorage.getItem('doxera_token');
     if (!authToken) return;
 
     setTwoFaLoading(true);
@@ -155,7 +155,7 @@ export default function SettingsPage() {
   // Handle API Key Creation
   const handleCreateApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    const authToken = token || localStorage.getItem('pdfforge_token');
+    const authToken = token || localStorage.getItem('doxera_token');
     if (!authToken || !newKeyName.trim()) return;
 
     try {
@@ -185,7 +185,7 @@ export default function SettingsPage() {
 
   // Handle API Key Revocation
   const handleRevokeApiKey = async (keyId: string) => {
-    const authToken = token || localStorage.getItem('pdfforge_token');
+    const authToken = token || localStorage.getItem('doxera_token');
     if (!authToken) return;
 
     if (!confirm('Are you sure you want to revoke this API key? Applications using it will lose access immediately.')) {

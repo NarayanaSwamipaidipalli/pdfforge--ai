@@ -1,5 +1,9 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { migrateTokenKeys } from './token-migration';
+
+// Run synchronously before Zustand hydrates so it reads from the new key names.
+migrateTokenKeys();
 
 const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
@@ -38,7 +42,9 @@ interface AuthState {
 function setCookie(name: string, value: string, days = 7) {
   if (typeof document === 'undefined') return;
   const expires = new Date(Date.now() + days * 864e5).toUTCString();
-  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+  const secure =
+    typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax${secure}`;
 }
 
 function deleteCookie(name: string) {
@@ -58,8 +64,8 @@ export const useAuthStore = create<AuthState>()(
 
       setAuth: (user: AuthUser, token: string) => {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('pdfforge_token', token);
-          setCookie('pdfforge_token', token, 7);
+          localStorage.setItem('doxera_token', token);
+          setCookie('doxera_token', token, 7);
         }
         set({ user, token, isAuthenticated: true });
       },
@@ -73,7 +79,7 @@ export const useAuthStore = create<AuthState>()(
       logout: async () => {
         const token =
           get().token ||
-          (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+          (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
 
         try {
           if (token) {
@@ -90,6 +96,9 @@ export const useAuthStore = create<AuthState>()(
           console.warn('Backend logout notification failed:', err);
         } finally {
           if (typeof window !== 'undefined') {
+            localStorage.removeItem('doxera_token');
+            deleteCookie('doxera_token');
+            // Also clear legacy key in case it survived migration
             localStorage.removeItem('pdfforge_token');
             deleteCookie('pdfforge_token');
           }
@@ -113,8 +122,8 @@ export const useAuthStore = create<AuthState>()(
             const newAccessToken = data.accessToken || data.tokens?.accessToken;
             if (newAccessToken) {
               if (typeof window !== 'undefined') {
-                localStorage.setItem('pdfforge_token', newAccessToken);
-                setCookie('pdfforge_token', newAccessToken, 7);
+                localStorage.setItem('doxera_token', newAccessToken);
+                setCookie('doxera_token', newAccessToken, 7);
               }
               set((state) => ({
                 token: newAccessToken,
@@ -134,7 +143,7 @@ export const useAuthStore = create<AuthState>()(
       syncProfile: async () => {
         let token =
           get().token ||
-          (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+          (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
 
         if (!token) return;
 
@@ -185,7 +194,7 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name: 'pdfforge_auth_storage',
+      name: 'doxera_auth_storage',
       onRehydrateStorage: () => (state) => {
         state?.setHydrated(true);
       },

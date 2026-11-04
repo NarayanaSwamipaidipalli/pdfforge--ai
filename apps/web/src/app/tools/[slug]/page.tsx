@@ -239,7 +239,7 @@ export default function ToolPage({ params }: ToolPageProps) {
     const API_BASE = '/api/v1';
 
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null;
+      const token = typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null;
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -360,7 +360,7 @@ export default function ToolPage({ params }: ToolPageProps) {
       // Determine proper file extension
       const ext = getOutputExtension();
       const baseName = files[0]?.name.replace(/\.[^/.]+$/, '') || 'document';
-      const resultFileName = `pdfforge_${tool.slug}_${baseName}.${ext}`;
+      const resultFileName = `doxera_${tool.slug}_${baseName}.${ext}`;
 
       // 3. Poll Job status until COMPLETED
       setProcessingStep(4);
@@ -410,7 +410,7 @@ export default function ToolPage({ params }: ToolPageProps) {
   const handleTriggerDownload = async () => {
     if (downloadUrl && !downloadUrl.startsWith('#')) {
       try {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null;
+        const token = typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null;
         const res = await fetch(downloadUrl, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
@@ -446,7 +446,7 @@ export default function ToolPage({ params }: ToolPageProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = downloadFileName || `pdfforge_${tool.slug}_${file.name.replace(/\.[^/.]+$/, '')}.${ext}`;
+      a.download = downloadFileName || `doxera_${tool.slug}_${file.name.replace(/\.[^/.]+$/, '')}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

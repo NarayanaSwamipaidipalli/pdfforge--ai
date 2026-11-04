@@ -1,0 +1,22 @@
+#!/bin/sh
+# Allow pushes to staging. Block main/develop until production deployment is verified.
+# Install with: node scripts/deployment/install-push-guard.mjs
+
+blocked_ref=
+while IFS=' ' read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/develop)
+      blocked_ref="$remote_ref"
+      break
+      ;;
+  esac
+done
+
+if [ -n "$blocked_ref" ]; then
+  printf '%s\n' \
+    "Push to ${blocked_ref#refs/heads/} blocked: no production services exist yet." \
+    "Verify Render production setup before pushing to protected branches." \
+    "See docs/STAGING_READINESS.md." >&2
+  exit 1
+fi
+exit 0

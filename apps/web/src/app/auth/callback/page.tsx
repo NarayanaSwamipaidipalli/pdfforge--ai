@@ -26,7 +26,7 @@ function CallbackContent() {
         // Remove credentials and one-time codes before any fetch can attach them as a referrer.
         window.history.replaceState({}, '', '/auth/callback');
         if (searchParams.get('error')) throw new Error('Google authentication failed. Please try again.');
-        const linking = !!state && sessionStorage.getItem('pdfforge_google_link_state') === state;
+        const linking = !!state && sessionStorage.getItem('doxera_google_link_state') === state;
         if (code) {
           const existingToken = useAuthStore.getState().token;
           if (!state || (linking && !existingToken)) throw new Error('Your sign-in session expired. Please try again.');
@@ -37,7 +37,7 @@ function CallbackContent() {
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.message || 'Google authentication failed');
-          sessionStorage.removeItem('pdfforge_google_link_state');
+          sessionStorage.removeItem('doxera_google_link_state');
           if (linking) {
             await syncProfile();
             return '/account';

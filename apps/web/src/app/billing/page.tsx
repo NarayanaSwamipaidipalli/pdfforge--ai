@@ -171,7 +171,7 @@ export default function BillingPage() {
   ];
 
   const fetchBillingData = useCallback(async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) {
       setLoadingHistory(false);
       return;
@@ -217,7 +217,7 @@ export default function BillingPage() {
       return;
     }
 
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) {
       window.location.href = '/login?redirect=/billing';
       return;
@@ -261,7 +261,7 @@ export default function BillingPage() {
   const handleExecuteCheckout = async () => {
     if (!selectedPlanForCheckout) return;
 
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) {
       window.location.href = '/login?redirect=/billing';
       return;
@@ -311,7 +311,7 @@ export default function BillingPage() {
 
   // Cancel Subscription
   const handleCancelSubscription = async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     setCanceling(true);
@@ -340,7 +340,7 @@ export default function BillingPage() {
 
   // Reactivate Subscription
   const handleReactivateSubscription = async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) return;
 
     setReactivating(true);
@@ -368,7 +368,7 @@ export default function BillingPage() {
 
   // Download Invoice PDF
   const handleDownloadInvoice = async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('pdfforge_token') : null);
+    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
     if (!authToken) {
       addToast('Please sign in to download tax invoices.', 'error');
       return;
@@ -402,6 +402,21 @@ export default function BillingPage() {
 
   const currentTier = user?.plan || activeSub?.tier || 'FREE';
   const isCanceledAtEnd = activeSub?.cancelAtPeriodEnd ?? false;
+
+  const storageUsedBytes = Number(user?.storageUsedBytes || 0);
+  const storageLimitBytes = Number(user?.storageLimitBytes || 1073741824);
+  const storageUsedMB = (storageUsedBytes / (1024 * 1024)).toFixed(0);
+  const storageLimitLabel =
+    storageLimitBytes >= 1073741824
+      ? `${(storageLimitBytes / 1073741824).toFixed(0)} GB`
+      : `${(storageLimitBytes / (1024 * 1024)).toFixed(0)} MB`;
+  const storageUsedLabel =
+    storageUsedBytes >= 1073741824
+      ? `${(storageUsedBytes / 1073741824).toFixed(2)} GB`
+      : `${storageUsedMB} MB`;
+  const storagePercent = storageLimitBytes > 0
+    ? Math.min(100, Math.round((storageUsedBytes / storageLimitBytes) * 100))
+    : 0;
   const renewalDate = activeSub?.currentPeriodEnd
     ? new Date(activeSub.currentPeriodEnd).toLocaleDateString('en-US', {
         month: 'short',
@@ -510,16 +525,12 @@ export default function BillingPage() {
                   </span>
                   <span>
                     {currentTier === 'ENTERPRISE'
-                      ? '12.4 GB / Unlimited'
-                      : currentTier === 'BUSINESS'
-                      ? '4.2 GB / 250 GB'
-                      : currentTier === 'PRO'
-                      ? '1.4 GB / 50 GB'
-                      : '180 MB / 1 GB'}
+                      ? `${storageUsedLabel} / Unlimited`
+                      : `${storageUsedLabel} / ${storageLimitLabel}`}
                   </span>
                 </div>
                 <div className="w-full bg-zinc-200 dark:bg-zinc-700 h-2 rounded-full overflow-hidden">
-                  <div className="bg-blue-600 h-full rounded-full" style={{ width: '28%' }} />
+                  <div className="bg-blue-600 h-full rounded-full" style={{ width: `${storagePercent}%` }} />
                 </div>
               </div>
 
