@@ -118,3 +118,22 @@ credentials to resolve a startup or migration error.
 ## Handoff rules
 
 After each task, record the task, changed files, tests/results, blockers and next task briefly.
+
+## Codex staging verification follow-up — 2026-11-04
+
+- User instruction in this session: production Render settings are not confirmed; keep pushes blocked.
+- Codex added explicit manual deployment settings, corrected service-level secret inputs,
+  prepared staging configuration/environment-name checks, and initially verified 12/12 focused tests.
+- Concurrent work advanced Git through d4b20ee, removed staging network isolation/protection,
+  and changed the tracked/installed push hook. Those edits and active auth/frontend/Compose
+  changes were preserved; ownership clarification is pending before shared-file edits resume.
+- Current results: both Blueprints pass the official Render JSON schema; the staging safety
+  contract fails for missing network isolation (focused suite: 9 pass, 3 fail). An all-push
+  local block and external Render/GitHub deployment triggers are no longer verified by this pass.
+- Files for this handoff: docs/STAGING_CODEX_VERIFICATION.md and this appended checkpoint note.
+  The note includes corrected Google redirect paths and Resend, DNS, backup, storage and
+  monitoring checklists. It records the limits of the concurrent readiness claims.
+- No push, deploy, service purchase, production secret change or development-resource change
+  was performed by this Codex pass. Other-session actions are not claimed as this pass's work.
+- Next task: confirm infrastructure ownership, reconcile the push/isolation requirements,
+  and rerun focused checks on the agreed tree. Do not weaken the checks just to make staging pass.
