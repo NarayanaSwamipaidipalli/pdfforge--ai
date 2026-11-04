@@ -1,5 +1,46 @@
 # Doxera — AI Handoff Document
 
+## Completed by Claude — 2026-11-04 (session 7)
+
+### Dependency vulnerability remediation — CI workflow #58
+
+**Root cause:** vitest@2's transitive dependency `tinypool <=2.1.1` had 2 critical CVEs
+(GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr — Prototype Pollution to RCE). These caused:
+- `apps/web` `npm audit --audit-level=high` failure in the application job
+- `scripts/remediation/registry-audit.cjs` exit code 1 in the integration job (npm bulk
+  advisory API query returned critical findings for the web package-lock)
+
+**Files changed:**
+
+| File | Change |
+| --- | --- |
+| `apps/web/package.json` | `vitest: ^2.1.9` → `^5.1.0`; `@types/node: ^20.14.11` → `^22.0.0`; added `vite: ^6.4.0` (explicit peer dep required by vitest@5) |
+| `apps/web/package-lock.json` | Regenerated — tinypool upgraded out of vulnerable range; vite@6 and vitest@5 resolved |
+
+**Test results after upgrade:**
+
+| Suite | Tests | Result |
+| --- | --- | --- |
+| `apps/web` vitest v5.1.0 (token migration + middleware) | 41 | ✅ all passed |
+| `apps/api` jest (all 16 suites) | 166 | ✅ all passed |
+| `apps/web` `tsc --noEmit` | — | ✅ 0 errors |
+| `apps/web` `npm audit --audit-level=high` | — | ✅ 0 vulnerabilities |
+| `apps/api` `npm audit --audit-level=high` | — | ✅ 0 findings at high/critical level |
+
+**Unresolved advisories (API dev-only, do not block CI):**
+
+`apps/api` has 23 low/moderate findings. All are dev-only and not actionable without breaking changes:
+
+| Package chain | Severity | Exposure | Notes |
+| --- | --- | --- | --- |
+| `deepmerge` via `fork-ts-checker-webpack-plugin` → `@nestjs/cli` | Moderate | Dev tooling only | Fixing requires `@nestjs/cli@6.8.1` (major downgrade) — not viable |
+| `minimatch <11.0.1` via jest/glob chain | Moderate | Dev tests only | Fixing requires downgrading `@nestjs/cli` and multiple jest packages — breaking |
+
+Production and staging deployments never install devDependencies (`NODE_ENV=production`
+in both Docker builds). No production surface exposure.
+
+---
+
 ## Completed by Claude — 2026-11-04 (session 6)
 
 ### CI staging branch support, test verification, credential isolation audit

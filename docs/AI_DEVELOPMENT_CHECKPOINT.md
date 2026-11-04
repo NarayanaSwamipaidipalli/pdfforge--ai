@@ -49,6 +49,16 @@ integration/performance, migration preservation and Render preparation work.
 - Existing credentials, records and volumes preserved; original four development container
   IDs/start times unchanged. No push, merge, deployment, domain purchase, DNS or secret change.
 
+2026-11-04 — Claude fixed CI workflow #58 dependency vulnerabilities (session 7).
+
+- Root cause: `tinypool <=2.1.1` (via vitest@2) had 2 critical RCE CVEs; failed both the
+  application job `npm audit --audit-level=high` and the integration job `registry-audit.cjs`.
+- Fix: upgraded `vitest@^2.1.9` → `^5.1.0`, `@types/node@^20.14.11` → `^22.0.0`, added
+  explicit `vite@^6.4.0` peer dep in `apps/web`. Web audit now reports 0 vulnerabilities.
+- Tests: 41 vitest + 166 jest = 207 all passed. tsc clean. API audit: 23 low/moderate dev-only
+  findings remain (not actionable without breaking changes; do not affect production).
+- No push, deploy, production change, or secret exposure.
+
 2026-11-04 — Claude completed CI staging support and credential isolation audit (session 6).
 
 - Files: `.github/workflows/ci.yml` (added `staging` branch to push + PR triggers; added `npm test`
