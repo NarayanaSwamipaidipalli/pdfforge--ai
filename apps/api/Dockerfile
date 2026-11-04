@@ -15,14 +15,14 @@ RUN npm run build
 FROM node:22-alpine AS runner
 RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
-RUN addgroup -S pdfforge && adduser -S pdfforge -G pdfforge
+RUN addgroup -S pdfforge && adduser -S pdfforge -G pdfforge \
+    && chown pdfforge:pdfforge /app
 
 ENV NODE_ENV=production
 COPY package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
-RUN chown -R pdfforge:pdfforge /app
+COPY --from=builder --chown=pdfforge:pdfforge /app/node_modules ./node_modules
+COPY --from=builder --chown=pdfforge:pdfforge /app/dist ./dist
+COPY --from=builder --chown=pdfforge:pdfforge /app/prisma ./prisma
 
 EXPOSE 4000
 USER pdfforge

@@ -5,15 +5,15 @@ services:
     container_name: pdfforge-postgres
     restart: always
     environment:
-      POSTGRES_USER: pdfforge
+      POSTGRES_USER: ${POSTGRES_USER:-pdfforge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-      POSTGRES_DB: pdfforge_db
+      POSTGRES_DB: ${POSTGRES_DB:-pdfforge_db}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pdfforge -d pdfforge_db"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -36,7 +36,7 @@ services:
 
   # MinIO S3-Compatible Local Storage
   minio:
-    image: ${MINIO_IMAGE:?Set a verified MinIO image tag or digest}
+    image: ${MINIO_IMAGE:-cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8}
     container_name: pdfforge-minio
     restart: always
     environment:
@@ -73,13 +73,14 @@ services:
     environment:
       PORT: 4000
       NODE_ENV: production
-      DATABASE_URL: postgresql://pdfforge:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/pdfforge_db?schema=public
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:?Run scripts/docker/prepare-env.mjs with your private env file}
       REDIS_URL: redis://redis:6379
+      AWS_REGION: ${AWS_REGION:-us-east-1}
       S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
-      S3_BUCKET_NAME: pdfforge-documents
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pdfforge-documents}
       PDF_WORKER_URL: http://pdf-worker:8000
       API_GATEWAY_INTERNAL_URL: http://api-gateway:4000
       WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:?Set a random WORKER_CALLBACK_SECRET}
@@ -89,7 +90,7 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:4000/api/v1/auth/google/callback}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-${FRONTEND_URL:-http://localhost:3000}}
     ports:
       - "127.0.0.1:4000:4000"
     depends_on:
@@ -111,16 +112,18 @@ services:
       API_GATEWAY_INTERNAL_URL: http://api-gateway:4000
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      AWS_REGION: ${AWS_REGION:-us-east-1}
       S3_ENDPOINT: http://minio:9000
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
-      S3_BUCKET_NAME: pdfforge-documents
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pdfforge-documents}
       PYTHONWARNINGS: "ignore::FutureWarning:fitz"
       WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:?Set a random WORKER_CALLBACK_SECRET}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   # Celery Async Distributed Processing Worker
   celery-worker:
@@ -136,15 +139,49 @@ services:
       API_GATEWAY_INTERNAL_URL: http://api-gateway:4000
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      AWS_REGION: ${AWS_REGION:-us-east-1}
       S3_ENDPOINT: http://minio:9000
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
-      S3_BUCKET_NAME: pdfforge-documents
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pdfforge-documents}
       PYTHONWARNINGS: "ignore::FutureWarning:fitz"
       WORKER_CALLBACK_SECRET: ${WORKER_CALLBACK_SECRET:?Set a random WORKER_CALLBACK_SECRET}
     depends_on:
-      - redis
-      - pdf-worker
+      redis:
+        condition: service_healthy
+      pdf-worker:
+        condition: service_started
+
+  # Explicit opt-in setup; normal service startup never applies migrations.
+  migrate:
+    profiles: ["setup"]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: "no"
+    environment:
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:?Run scripts/docker/prepare-env.mjs with your private env file}
+    command: ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  storage-init:
+    profiles: ["setup"]
+    build:
+      context: ./services/pdf-worker
+      dockerfile: Dockerfile
+    restart: "no"
+    command: ["python", "-m", "app.init_storage"]
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pdfforge-documents}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    depends_on:
+      minio:
+        condition: service_started
 
   # Next.js 15 Web Frontend
   web:
