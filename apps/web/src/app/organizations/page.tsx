@@ -378,7 +378,7 @@ export default function OrganizationsPage() {
                       <div>
                         <div className="font-medium text-zinc-900">{user?.name || 'Alex Morgan'}</div>
                         <div className="text-[11px] text-zinc-400 font-mono">
-                          {user?.email || 'admin@pdfforge.ai'}
+                          {user?.email || 'admin@doxera.in'}
                         </div>
                       </div>
                     </td>

@@ -1,6 +1,6 @@
 # pdfforge-cli
 
-Official Command Line Interface for the **PDFForge AI – Enterprise PDF Intelligence Platform**.
+Official Command Line Interface for the **Doxera – Enterprise PDF Intelligence Platform**.
 
 Automate PDF processing pipelines, run OCR, execute AI document summaries, extract invoices, and monitor enterprise clusters directly from your terminal or CI/CD pipelines.
 
@@ -15,7 +15,7 @@ npx pdfforge-cli --help
 ## Authentication
 
 ```bash
-pdfforge login --email admin@pdfforge.ai --password "AdminPassword123!"
+pdfforge login --email admin@doxera.in --password "AdminPassword123!"
 ```
 
 ## Commands

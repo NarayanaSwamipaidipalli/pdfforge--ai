@@ -5,10 +5,10 @@ import { Footer } from '@/components/layout/Footer';
 import { ToastProvider } from '@/components/ui/Toast';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://pdfforge.ai'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://doxera.in'),
   title: {
-    default: 'PDFForge AI – Enterprise PDF Intelligence Platform',
-    template: '%s | PDFForge AI',
+    default: 'Doxera – Enterprise PDF Intelligence Platform',
+    template: '%s | Doxera',
   },
   description:
     'Scalable enterprise cloud and air-gapped PDF processing platform with 24+ tools, OCR, RAG document chat, invoice extraction, and DoD-grade compliance.',
@@ -23,9 +23,9 @@ export const metadata: Metadata = {
     'Contract Review AI',
     'Enterprise PDF SaaS',
   ],
-  authors: [{ name: 'PDFForge AI Architecture Team' }],
-  creator: 'PDFForge AI',
-  publisher: 'PDFForge AI Inc.',
+  authors: [{ name: 'Doxera Architecture Team' }],
+  creator: 'Doxera',
+  publisher: 'Doxera',
   formatDetection: {
     email: false,
     address: false,
@@ -34,26 +34,25 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://pdfforge.ai',
-    siteName: 'PDFForge AI',
-    title: 'PDFForge AI – Enterprise PDF Intelligence & Conversion Platform',
+    url: 'https://doxera.in',
+    siteName: 'Doxera',
+    title: 'Doxera – Enterprise PDF Intelligence & Conversion Platform',
     description:
       'Enterprise-grade PDF ecosystem with AI RAG document chat, OCR, compression, digital signatures, and 100% private on-premise LLM inference.',
     images: [
       {
-        url: '/og-image.png',
+        url: '/opengraph-image',
         width: 1200,
         height: 630,
-        alt: 'PDFForge AI Enterprise Platform',
+        alt: 'Doxera Enterprise Platform',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PDFForge AI – Enterprise PDF Intelligence',
+    title: 'Doxera – Enterprise PDF Intelligence',
     description:
       'Enterprise-grade PDF processing with 24+ tools, OCR, and private AI Document Intelligence.',
-    creator: '@pdfforge_ai',
   },
   robots: {
     index: true,
@@ -76,7 +75,7 @@ export default function RootLayout({
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
-    name: 'PDFForge AI',
+    name: 'Doxera',
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'All',
     offers: {

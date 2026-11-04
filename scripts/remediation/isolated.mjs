@@ -7,7 +7,8 @@ import { resolve } from 'node:path';
 
 export const root = fileURLToPath(new URL('../../', import.meta.url));
 const evidence = resolve(root, '.remediation');
-const manifestPath = resolve(evidence, 'isolated-run.json');
+const manifestPath = process.env.PDFFORGE_SECURITY_MANIFEST ? resolve(root, process.env.PDFFORGE_SECURITY_MANIFEST) : resolve(evidence, 'isolated-run.json');
+if (!manifestPath.startsWith(evidence + (evidence.includes('\\') ? '\\' : '/'))) throw new Error('Test manifest must stay inside .remediation');
 const safeEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
   /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|USERPROFILE|HOMEDRIVE|HOMEPATH|PROGRAMDATA|APPDATA|LOCALAPPDATA|DOCKER_CONFIG)$/i.test(key)));
 

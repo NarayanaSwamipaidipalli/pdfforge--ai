@@ -163,7 +163,7 @@ export default function BillingPage() {
         'Unlimited team seats & private storage',
         'Dedicated worker pod cluster',
         'Single Sign-On (SAML / Okta / Azure AD)',
-        'Signed BAA for HIPAA / SOC2 compliance',
+        'Deployment security review',
         'Custom LLM & fine-tuned RAG models',
         'Dedicated solutions architect',
       ],
@@ -386,7 +386,7 @@ export default function BillingPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `PDFForge_Tax_Invoice_${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.download = `Doxera_Invoice_${new Date().toISOString().slice(0, 10)}.pdf`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);

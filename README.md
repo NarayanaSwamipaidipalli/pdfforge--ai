@@ -1,9 +1,12 @@
-# PDFForge AI – Enterprise PDF Intelligence Platform
-> High-throughput, cloud-native PDF processing and document intelligence SaaS platform engineered for millions of concurrent users.
+# Doxera – Enterprise PDF Intelligence Platform
+> PDF processing and document intelligence with isolated security and conversion verification.
+
+Production rollout is pending the external checks in the [Render deployment runbook](docs/PRODUCTION_DEPLOYMENT.md).
+See the [security remediation report](docs/security-remediation-report.md) for measured results and limitations.
 
 [![License](https://img.shields.io/badge/License-Enterprise-blue.svg)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-15_App_Router-black)](https://nextjs.org)
-[![NestJS](https://img.shields.io/badge/NestJS-10.4-red)](https://nestjs.com)
+[![NestJS](https://img.shields.io/badge/NestJS-11-red)](https://nestjs.com)
 [![PyMuPDF](https://img.shields.io/badge/PyMuPDF-1.24-green)](https://pymupdf.readthedocs.io)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16_+_pgvector-blue)](https://postgresql.org)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-EKS_v1.30-326CE5)](https://kubernetes.io)
@@ -12,7 +15,7 @@
 
 ## 🌟 Executive Overview
 
-**PDFForge AI** is a production-grade, enterprise alternative to platforms like iLovePDF and Adobe Acrobat Web, elevated with state-of-the-art **AI Document Intelligence (RAG)**, automated invoice & contract auditing, zero-data-retention compliance, and multi-tenant team workspaces.
+**Doxera** provides PDF processing, **AI Document Intelligence (RAG)**, invoice and contract tools, and team workspaces. Deployment security, retention and provider configuration require the documented verification before launch.
 
 The platform processes deterministic document manipulations (lossless compression, vector rasterization, office conversions, OCR) through an auto-scaling Python worker cluster, coordinated by an asynchronous NestJS API Gateway and Redis/Celery queue fabric.
 
@@ -137,7 +140,7 @@ npm run dev
 - **Zero-Permanent-Storage Principle**: Documents are held in volatile RAM mounts during execution and shredded via **DoD 5220.22-M** 3-pass cryptographic wipe routines.
 - **Ephemeral S3 Lifecycle**: Automatic 24-hour expiration rule permanently deletes raw and processed files from S3 buckets.
 - **ClamAV Anti-Malware Protection**: Pre-processing virus scanning checks for embedded malicious PDF objects (`/JS`, `/Launch`, exploits).
-- **Compliance Ready**: Fully engineered to meet **GDPR (Articles 17 & 32)**, **HIPAA BAA**, and **SOC2 Type II** specifications.
+- **Security review**: See the verified controls and deployment limitations in [Security status](docs/SECURITY_COMPLIANCE.md). Independent certification and regulatory compliance have not been established.
 
 ---
 
@@ -158,4 +161,4 @@ npm run dev
 - [Testing & Concurrency Load Benchmark](docs/TESTING_STRATEGY.md)
 
 ---
-*Authored with enterprise software engineering standards by the PDFForge AI Architecture Team.*
+*Authored with enterprise software engineering standards by the Doxera Architecture Team.*

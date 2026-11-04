@@ -1,88 +1,82 @@
-name: PDFForge AI Enterprise CI/CD Pipeline
+name: Doxera security and integration
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  test-api:
-    name: Backend API Gateway Tests
+  application:
+    name: Application tests, builds and npm audit
     runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      LOAD_LOCAL_ENV: 'false'
+      DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+      NEXT_TELEMETRY_DISABLED: '1'
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: 'apps/api/package.json'
-
-      - name: Install API Dependencies
-        working-directory: ./apps/api
-        run: npm ci
-
-      - name: Validate Prisma Schema
-        working-directory: ./apps/api
-        run: npx prisma validate
-
-      - name: Run Jest Unit Tests
-        working-directory: ./apps/api
-        run: npm test
-
-  test-worker:
-    name: Python PDF Worker Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Python Dependencies
-        working-directory: ./services/pdf-worker
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/api/package-lock.json
+            apps/web/package-lock.json
+      - name: Install API dependencies and generate client (no database connection)
+        working-directory: apps/api
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          npm ci --no-audit --no-fund
+          npx prisma validate
+          npx prisma generate
+      - name: API regression tests and build
+        working-directory: apps/api
+        run: |
+          npm test -- --runInBand
+          npm run build
+          npm audit --audit-level=high
+      - name: Frontend build and audit
+        working-directory: apps/web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm audit --audit-level=high
+      - name: Proxy, redirect and Compose helper regressions
+        run: node --test scripts/remediation/proxy.test.mjs scripts/remediation/safe-redirect.test.mjs scripts/docker/prepare-env.test.mjs
 
-      - name: Run Python Worker Unit Tests
-        working-directory: ./services/pdf-worker
-        run: python -m unittest discover tests
-
-  build-containers:
-    name: Docker Container Image Validation
+  isolated-integration:
+    name: Real Docker, PostgreSQL, billing and conversion checks
     runs-on: ubuntu-latest
-    needs: [test-api, test-worker]
+    timeout-minutes: 55
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Web Container
-        uses: docker/build-push-action@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          context: ./apps/web
-          push: false
-          tags: pdfforge-web:test
-
-      - name: Build API Container
-        uses: docker/build-push-action@v5
+          node-version: 22
+      - name: Run with synthetic credentials and fresh resources only
+        run: node scripts/remediation/ci.mjs
+      - name: Upload only non-secret test summaries and synthetic conversion output
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          context: ./apps/api
-          push: false
-          tags: pdfforge-api:test
-
-      - name: Build Worker Container
-        uses: docker/build-push-action@v5
-        with:
-          context: ./services/pdf-worker
-          push: false
-          tags: pdfforge-worker:test
+          name: isolated-verification
+          if-no-files-found: ignore
+          path: |
+            .remediation/auth-results.txt
+            .remediation/billing-results.txt
+            .remediation/migration-results-*.json
+            .remediation/worker-audit.json
+            .remediation/*-registry-audit.json
+            .remediation/render-validation.txt
+            .remediation/pipeline-*/pdf-validation.json
+            .remediation/pipeline-*/performance-results.json
+            .remediation/pipeline-*/backup-results.json
+            .remediation/pipeline-*/web-runtime-results.txt
+            .remediation/pipeline-*/pipeline-result.pdf
+            .remediation/pipeline-*/pipeline-result.png
+          retention-days: 7

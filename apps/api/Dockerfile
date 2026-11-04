@@ -12,6 +12,9 @@ COPY . .
 RUN npm run prisma:generate
 RUN npm run build
 
+FROM builder AS production-dependencies
+RUN npm prune --omit=dev --ignore-scripts --no-audit --no-fund
+
 FROM node:22-alpine AS runner
 RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
@@ -20,7 +23,7 @@ RUN addgroup -S pdfforge && adduser -S pdfforge -G pdfforge \
 
 ENV NODE_ENV=production
 COPY package*.json ./
-COPY --from=builder --chown=pdfforge:pdfforge /app/node_modules ./node_modules
+COPY --from=production-dependencies --chown=pdfforge:pdfforge /app/node_modules ./node_modules
 COPY --from=builder --chown=pdfforge:pdfforge /app/dist ./dist
 COPY --from=builder --chown=pdfforge:pdfforge /app/prisma ./prisma
 

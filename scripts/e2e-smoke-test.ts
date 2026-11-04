@@ -311,7 +311,7 @@ async function main() {
   // 8. Webhook Security
   log('🛡️', 'Stage 8: Webhook Cryptographic Integrity');
   await runTest('Verify HMAC-SHA256 Webhook Signature', async () => {
-    const secret = 'whsec_prod_enterprise_test_key_2026';
+    const secret = (process.env.PDFFORGE_TEST_WEBHOOK_SECRET || globalThis.crypto.randomUUID());
     const payload = JSON.stringify({ event: 'job.completed', jobId: ctx.jobId });
     const hmac = crypto.createHmac('sha256', secret);
     const signature = hmac.update(payload).digest('hex');

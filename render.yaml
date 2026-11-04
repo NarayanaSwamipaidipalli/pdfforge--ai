@@ -4,7 +4,7 @@ envVarGroups:
   - name: pdfforge-shared
     envVars:
       - key: WORKER_CALLBACK_SECRET
-        generateValue: true
+        sync: false
       - key: AWS_REGION
         value: us-east-1
       - key: S3_BUCKET_NAME
@@ -17,12 +17,16 @@ envVarGroups:
 services:
   - type: web
     name: pdfforge-web
+    # Proposed domains; apply only after ownership verification and rollout approval.
+    domains: [doxera.in]
     runtime: docker
     plan: 0.5c-512mb
     dockerContext: ./apps/web
     dockerfilePath: ./apps/web/Dockerfile
     healthCheckPath: /login
     envVars:
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://doxera.in
       - key: PORT
         value: 3000
       - key: API_GATEWAY_HOSTPORT
@@ -33,6 +37,7 @@ services:
 
   - type: web
     name: pdfforge-api
+    domains: [api.doxera.in]
     runtime: docker
     plan: 0.5c-512mb
     dockerContext: ./apps/api
@@ -65,25 +70,34 @@ services:
           name: pdfforge-api
           property: hostport
       - key: FRONTEND_URL
-        sync: false
+        value: https://doxera.in
       - key: CORS_ORIGINS
-        sync: false
+        value: https://doxera.in
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: JWT_REFRESH_SECRET
-        generateValue: true
+        sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
       - key: GOOGLE_CALLBACK_URL
+        value: https://doxera.in/api/v1/auth/google/callback
+      - key: MAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        # Set Doxera <noreply@doxera.in> only after the sender domain is verified.
+        sync: false
+      - key: SENTRY_DSN
         sync: false
       - key: ENABLE_STRIPE
-        value: false
+        value: 'false'
       - key: ENABLE_RAZORPAY
-        value: false
+        value: 'false'
       - key: ENABLE_PAYPAL
-        value: false
+        value: 'false'
 
   # Same production Docker image supplies FastAPI and the separate Celery process.
   - type: web
@@ -161,6 +175,7 @@ services:
 databases:
   - name: pdfforge-postgres
     plan: basic-256mb
-    postgresMajorVersion: 16
+    ipAllowList: []
+    postgresMajorVersion: '16'
     databaseName: pdfforge_db
     user: pdfforge

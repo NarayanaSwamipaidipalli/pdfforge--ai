@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import { TOKEN_AUDIENCE, TOKEN_ISSUER } from '../auth/token-policy';
+import { PrismaService } from '../prisma/prisma.service';
 
 describe('AI HTTP authentication boundary', () => {
   let app: INestApplication;
@@ -33,6 +34,7 @@ describe('AI HTTP authentication boundary', () => {
         { provide: AiService, useValue: service },
         { provide: JwtService, useValue: jwt },
         { provide: ConfigService, useValue: { getOrThrow: () => secret } },
+        { provide: PrismaService, useValue: { user: { findUnique: jest.fn().mockResolvedValue({ id: owner, globalRole: 'USER', tokenVersion: 0 }) } } },
       ],
     }).compile();
     app = module.createNestApplication({ logger: false });

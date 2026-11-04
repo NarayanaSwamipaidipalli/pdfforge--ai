@@ -10,7 +10,7 @@ const database = new URL(process.env.DATABASE_URL);
 const api = new URL(process.env.PIPELINE_API_URL);
 const worker = new URL(process.env.PDF_WORKER_URL);
 const storage = new URL(process.env.S3_ENDPOINT);
-const resource = /^pdfforge-security-\d+-[a-f0-9]{8}-pipeline-[a-f0-9]{8}-(api|worker|minio)$/;
+const resource = /^pdfforge-[a-f0-9]{8}-pipeline-(api|worker|minio)$/;
 if (!/^pdfforge-security-\d+-[a-f0-9]{8}-postgres$/.test(database.hostname)
   || database.hostname !== process.env.EXPECTED_DB_HOST
   || !/^security_pipeline_[a-f0-9]{8}$/.test(database.pathname.slice(1))
@@ -22,7 +22,7 @@ if (!/^pdfforge-security-\d+-[a-f0-9]{8}-postgres$/.test(database.hostname)
 }
 const prisma = new PrismaClient({ log: [] });
 const sleep = ms => new Promise(done => setTimeout(done, ms));
-let checks = 0;
+let checks = 0, lastHttp;
 const pass = label => { checks++; console.log(`PASS: ${label}`); };
 
 async function call(path, { method = 'GET', token, body, headers = {} } = {}) {
@@ -32,6 +32,7 @@ async function call(path, { method = 'GET', token, body, headers = {} } = {}) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function json(response, status) {
+  lastHttp = { path: new URL(response.url).pathname, actualStatus: response.status, expectedStatus: status };
   assert.equal(response.status, status, 'Unexpected HTTP status');
   return response.json();
 }
@@ -141,8 +142,10 @@ async function ready(url) {
   fs.writeFileSync('/tmp/pipeline-result.pdf', pdf, { flag: 'wx', mode: 0o644 });
   pass('authenticated download streams the actual PDF bytes; cross-user status/download requests are denied');
   console.log(`PASS: ${checks} full isolated production pipeline assertions; PDF retained for worker-image structural validation`);
-})().catch(() => {
+})().catch(error => {
   // Do not print fetch URLs, JWTs, request objects or Prisma connection diagnostics.
   console.error('FAIL: isolated pipeline assertion failed; inspect newly labeled resources and private test evidence');
+  console.error(JSON.stringify({ checks, lastHttp, errorType: error.name,
+    message: ['Real Celery conversion or callback failed', 'Conversion did not complete within the isolated test timeout'].includes(error.message) ? error.message : undefined }));
   process.exitCode = 1;
 }).finally(async () => { await prisma.$disconnect(); });

@@ -1,5 +1,5 @@
 """
-PDFForge AI Worker Engine Application Package
+Doxera Worker Engine Application Package
 """
 import warnings
 

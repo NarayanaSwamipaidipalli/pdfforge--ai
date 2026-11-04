@@ -3,8 +3,8 @@ import Link from 'next/link';
 import { ShieldCheck, Cpu, Terminal, Users, Lock, HeartHandshake, ArrowRight, Building2 } from 'lucide-react';
 
 export const metadata = {
-  title: 'About Us – PDFForge AI Architecture & Mission',
-  description: 'Learn about PDFForge AI, our mission to build the world fastest, most private enterprise document intelligence platform.',
+  title: 'About Us – Doxera Architecture & Mission',
+  description: 'Learn about Doxera, our mission to build the world fastest, most private enterprise document intelligence platform.',
 };
 
 export default function AboutPage() {
@@ -20,7 +20,7 @@ export default function AboutPage() {
             Re-engineering document processing for the AI era
           </h1>
           <p className="text-zinc-600 text-sm sm:text-base leading-relaxed">
-            PDFForge AI was founded to solve a critical enterprise problem: legacy PDF tools are slow, insecure, hold customer documents hostage on third-party servers, and lack private AI capabilities.
+            Doxera was founded to solve a critical enterprise problem: legacy PDF tools are slow, insecure, hold customer documents hostage on third-party servers, and lack private AI capabilities.
           </p>
         </div>
 
@@ -42,7 +42,7 @@ export default function AboutPage() {
             </div>
             <h3 className="font-semibold text-zinc-900 text-base">Air-Gapped AI (Ollama / vLLM)</h3>
             <p className="text-xs text-zinc-500 leading-relaxed">
-              Unlike cloud-only alternatives that leak confidential contracts to commercial LLMs, PDFForge supports 100% on-premise private AI with Zero-Cloud Egress guarantees.
+              Unlike cloud-only alternatives that leak confidential contracts to commercial LLMs, Doxera supports 100% on-premise private AI with Zero-Cloud Egress guarantees.
             </p>
           </div>
 
@@ -85,10 +85,10 @@ export default function AboutPage() {
             <ShieldCheck className="w-4 h-4" /> Enterprise Security
           </div>
           <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-            Certified for healthcare, finance, and legal compliance
+            Security for document workflows
           </h2>
           <p className="text-xs sm:text-sm text-zinc-400 max-w-2xl leading-relaxed">
-            Our platform adheres to SOC2 Type II, HIPAA BAA agreements, GDPR Article 17 ("Right to Erasure"), and ISO/IEC 27001 data processing requirements. All data in transit is encrypted using TLS 1.3 and stored with AWS KMS SSE-256.
+            Doxera uses authenticated access to document processing and account permissions. Hosting, encryption, retention, and regulatory requirements must be reviewed for each deployment. No independent certification is claimed.
           </p>
 
           <div className="pt-2 flex items-center gap-4">

@@ -10,6 +10,7 @@ const suffix = randomBytes(4).toString('hex');
 const image = `${run.project}-api:verification`;
 const initial = readFileSync(resolve(root, 'apps/api/prisma/migrations/20261031000000_initial_schema/migration.sql'), 'utf8');
 const forward = readFileSync(resolve(root, 'apps/api/prisma/migrations/20261103000000_security_billing/migration.sql'), 'utf8');
+const auth = readFileSync(resolve(root, 'apps/api/prisma/migrations/20261104000000_auth_revocation/migration.sql'), 'utf8');
 const results = [];
 let step = 0;
 
@@ -30,7 +31,8 @@ function prisma(database, args, expectedErrorCode) {
     if (expectedErrorCode) throw new Error('Expected migration rejection did not occur');
     return output;
   } catch (error) {
-    if (expectedErrorCode && error.detail?.includes(expectedErrorCode)) return 'rejected';
+    const codes = Array.isArray(expectedErrorCode) ? expectedErrorCode : [expectedErrorCode];
+    if (expectedErrorCode && codes.some(code => error.detail?.includes(code))) return 'rejected';
     if (error.detail) writeFileSync(resolve(root, '.remediation/migration-error-private.txt'), error.detail, { mode: 0o600 });
     // Prisma details may include connection strings; keep console output credential-free.
     throw new Error(`Isolated Prisma ${args[0]} ${args[1]} failed; resources retained`);
@@ -76,12 +78,19 @@ function preserved(database, before) {
 }
 
 try {
-  for (const variant of ['fresh', 'baseline', 'partial', 'already', 'unbaselined', 'incompatible', 'duplicates', 'bad_index']) {
+  const all = ['fresh', 'baseline', 'partial', 'already', 'unbaselined', 'incompatible', 'duplicates', 'bad_index', 'auth_partial', 'auth_adopted', 'auth_incompatible'];
+  const variants = process.argv[2] === '--variants' ? process.argv[3].split(',') : all;
+  if (variants.some(variant => !all.includes(variant))) throw new Error('Unknown migration fixture');
+  for (const variant of variants) {
     const database = `security_migration_${variant}_${suffix}`;
     command('docker', ['exec', run.postgres, 'createdb', '-U', run.dbUser, database]);
     if (variant !== 'fresh') sql(database, initial);
     if (variant === 'partial') sql(database, `ALTER TABLE users ADD COLUMN provider TEXT DEFAULT 'LOCAL'; ALTER TABLE subscriptions ADD COLUMN "paypalSubscriptionId" TEXT;`);
     if (variant === 'already') sql(database, forward);
+    if (['auth_adopted', 'auth_incompatible'].includes(variant)) sql(database, forward);
+    if (variant === 'auth_adopted') sql(database, auth);
+    if (variant === 'auth_partial') sql(database, 'ALTER TABLE users ADD COLUMN "tokenVersion" INTEGER NOT NULL DEFAULT 7;');
+    if (variant === 'auth_incompatible') sql(database, 'ALTER TABLE users ADD COLUMN "tokenVersion" TEXT NOT NULL DEFAULT \'synthetic\';');
     if (variant === 'incompatible') sql(database, 'ALTER TABLE users ADD COLUMN "googleId" INTEGER;');
     if (variant === 'bad_index') sql(database, 'ALTER TABLE users ADD COLUMN "googleId" TEXT; CREATE INDEX "users_googleId_key" ON users("googleId");');
     if (variant === 'duplicates') sql(database, `ALTER TABLE users ADD COLUMN "googleId" TEXT;
@@ -92,14 +101,26 @@ try {
       UPDATE subscriptions SET "paypalSubscriptionId"='paypal-sentinel', interval='yearly',"trialEndsAt"=TIMESTAMP '2026-02-01' WHERE id='sentinel-sub';
       INSERT INTO webhook_events (id,"eventId",provider,"eventType",payload) VALUES ('sentinel-webhook','legacy-event','razorpay','payment.captured','{"synthetic":true}');`);
     const before = snapshot(database);
+    const providerBefore = sql(database, `SELECT count(*) FROM information_schema.columns WHERE table_name='users' AND column_name='provider';`);
     if (variant === 'unbaselined') prisma(database, ['migrate', 'deploy'], 'P3005');
     if (variant !== 'fresh') prisma(database, ['migrate', 'resolve', '--applied', '20261031000000_initial_schema']);
-    const rejecting = ['incompatible', 'duplicates', 'bad_index'].includes(variant);
-    prisma(database, ['migrate', 'deploy'], rejecting ? 'P3018' : undefined);
+    if (['auth_adopted', 'auth_incompatible'].includes(variant)) prisma(database, ['migrate', 'resolve', '--applied', '20261103000000_security_billing']);
+    if (variant === 'auth_adopted') prisma(database, ['migrate', 'resolve', '--applied', '20261104000000_auth_revocation']);
+    const rejecting = ['incompatible', 'duplicates', 'bad_index', 'auth_incompatible'].includes(variant);
+    if (rejecting) {
+      const expected = { incompatible: 'Incompatible schema', duplicates: 'could not create unique index', bad_index: 'Incompatible index', auth_incompatible: 'Incompatible users.tokenVersion' }[variant];
+      let rejected = false;
+      try { sql(database, variant === 'auth_incompatible' ? auth : forward); }
+      catch (error) { if (error.detail?.includes(expected)) rejected = true; else throw error; }
+      if (!rejected) throw new Error('Expected SQL schema rejection did not occur');
+    }
+    // Prisma 5 can mask a SQL exception inside BEGIN/COMMIT with PostgreSQL 25P02.
+    // The direct SQL check above establishes the original failure reason first.
+    prisma(database, ['migrate', 'deploy'], rejecting ? ['P3018', 'current transaction is aborted'] : undefined);
     preserved(database, before);
     if (rejecting) {
       // BEGIN/COMMIT must roll back every additive DDL change on incompatibility or duplicate values.
-      if (sql(database, `SELECT count(*) FROM information_schema.columns WHERE table_name='users' AND column_name='provider';`) !== '0') {
+      if (sql(database, `SELECT count(*) FROM information_schema.columns WHERE table_name='users' AND column_name='provider';`) !== providerBefore) {
         throw new Error('Rejected migration left partial schema changes');
       }
     } else {
@@ -113,6 +134,7 @@ try {
     console.log(`PASS: isolated migration ${variant}`);
   }
   writeFileSync(resolve(root, '.remediation/migration-results.json'), JSON.stringify({ run: run.project, image, results }, null, 2));
+  writeFileSync(resolve(root, `.remediation/migration-results-${suffix}.json`), JSON.stringify({ run: run.project, image, results }, null, 2));
   console.log('Migration matrix passed. All isolated databases and containers retained.');
 } catch (error) {
   writeFileSync(resolve(root, '.remediation/migration-results.json'), JSON.stringify({ run: run.project, image, results, failed: true, error: error.message }, null, 2));

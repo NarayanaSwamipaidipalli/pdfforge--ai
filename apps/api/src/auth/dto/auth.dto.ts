@@ -2,7 +2,7 @@ import { IsEmail, IsNotEmpty, IsOptional, MinLength, IsString } from 'class-vali
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RegisterDto {
-  @ApiProperty({ example: 'user@pdfforge.ai' })
+  @ApiProperty({ example: 'user@doxera.in' })
   @IsEmail()
   @IsNotEmpty()
   email: string;
@@ -19,7 +19,7 @@ export class RegisterDto {
 }
 
 export class LoginDto {
-  @ApiProperty({ example: 'user@pdfforge.ai' })
+  @ApiProperty({ example: 'user@doxera.in' })
   @IsEmail()
   @IsNotEmpty()
   email: string;
@@ -84,7 +84,7 @@ export class GoogleOAuthStartDto {
 }
 
 export class ForgotPasswordDto {
-  @ApiProperty({ example: 'user@pdfforge.ai' })
+  @ApiProperty({ example: 'user@doxera.in' })
   @IsEmail()
   @IsNotEmpty()
   email: string;

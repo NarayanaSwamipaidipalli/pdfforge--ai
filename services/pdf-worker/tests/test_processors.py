@@ -5,7 +5,7 @@ from app.config import settings
 class TestPDFWorkerConfig(unittest.TestCase):
     def test_settings_loaded(self):
         self.assertIsNotNone(settings.APP_NAME)
-        self.assertIn("PDFForge", settings.APP_NAME)
+        self.assertIn("Doxera", settings.APP_NAME)
 
 class TestRAGChunkingLogic(unittest.TestCase):
     def test_word_overlap_chunking(self):

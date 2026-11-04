@@ -7,6 +7,7 @@ import {
   OnModuleInit,
   Logger,
   ServiceUnavailableException,
+  Optional,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -17,6 +18,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../prisma/prisma.service';
 import { effectivePlan } from '../common/effective-plan';
 import { TOKEN_ISSUER, TOKEN_AUDIENCE, tokenVerificationOptions, validTokenClaims } from './token-policy';
+import { TransactionalEmail } from './transactional-email';
 import {
   RegisterDto,
   LoginDto,
@@ -43,6 +45,7 @@ export class AuthService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Optional() private readonly emailDelivery: TransactionalEmail = new TransactionalEmail(configService),
   ) {}
 
   async onModuleInit() {
@@ -89,6 +92,10 @@ export class AuthService implements OnModuleInit {
     );
     const params = new URLSearchParams({ client_id: clientId, redirect_uri: target, response_type: 'code',
       scope: 'openid email profile', prompt: 'select_account', state, nonce });
+    await this.prisma.oAuthState.create({ data: {
+      stateHash: crypto.createHash('sha256').update(state).digest('hex'), userId: userId || null,
+      redirectUri: target, expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    } });
     return { url: 'https://accounts.google.com/o/oauth2/v2/auth?' + params, clientId, cookie };
   }
 
@@ -101,6 +108,11 @@ export class AuthService implements OnModuleInit {
         || !crypto.timingSafeEqual(Buffer.from(payload.state), Buffer.from(state))
         || payload.redirectUri !== this.googleRedirectUri(redirectUri)
         || (payload.userId || null) !== (userId || null)) throw new Error();
+      const claimed = await this.prisma.oAuthState.updateMany({ where: {
+        stateHash: crypto.createHash('sha256').update(state).digest('hex'), consumedAt: null,
+        userId: userId || null, redirectUri: payload.redirectUri, expiresAt: { gt: new Date() },
+      }, data: { consumedAt: new Date() } });
+      if (claimed.count !== 1) throw new Error();
       return payload as { nonce: string; redirectUri: string; userId: string | null };
     } catch {
       throw new UnauthorizedException('Invalid or expired OAuth state');
@@ -149,8 +161,8 @@ export class AuthService implements OnModuleInit {
       },
     });
 
-    const tokens = await this.generateTokens(user.id, user.email, user.globalRole);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
+    const tokens = await this.generateTokens(user.id, user.email, user.globalRole, user.tokenVersion ?? 0);
+    await this.updateRefreshToken(user.id, tokens.refreshToken, user.tokenVersion ?? 0);
 
     return {
       user: {
@@ -183,8 +195,8 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.globalRole);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
+    const tokens = await this.generateTokens(user.id, user.email, user.globalRole, user.tokenVersion ?? 0);
+    await this.updateRefreshToken(user.id, tokens.refreshToken, user.tokenVersion ?? 0);
 
     // Track active user session
     try {
@@ -392,8 +404,8 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException(`Account suspended: ${user.banReason || 'Please contact customer support.'}`);
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.globalRole);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
+    const tokens = await this.generateTokens(user.id, user.email, user.globalRole, user.tokenVersion ?? 0);
+    await this.updateRefreshToken(user.id, tokens.refreshToken, user.tokenVersion ?? 0);
 
     // Track active user session
     try {
@@ -430,36 +442,42 @@ export class AuthService implements OnModuleInit {
   }
 
   async forgotPassword(email: string) {
+    this.emailDelivery.assertConfigured();
+    const response = { success: true, message: 'If the account can be recovered, password reset instructions will be sent.' };
     const user = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
     });
 
-    if (!user) {
-      return { success: true, message: 'If that email address is registered, password reset instructions have been sent.' };
-    }
+    if (!user || user.isBanned || !user.passwordHash) return response;
 
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetExpires = new Date(Date.now() + 3600000); // 1 hour
+    const resetExpires = new Date(Date.now() + 15 * 60 * 1000);
+    const digest = crypto.createHash('sha256').update(resetToken).digest('hex');
 
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        passwordResetToken: crypto.createHash('sha256').update(resetToken).digest('hex'),
+        passwordResetToken: digest,
         passwordResetExpiresAt: resetExpires,
       },
     });
 
-    return {
-      success: true,
-      message: 'If that email address is registered, password reset instructions have been sent.',
-    };
+    try { await this.emailDelivery.sendPasswordReset(user.email, resetToken); }
+    catch {
+      // Preserve another concurrent reset request and never disclose account existence.
+      await this.prisma.user.updateMany({ where: { id: user.id, passwordResetToken: digest },
+        data: { passwordResetToken: null, passwordResetExpiresAt: null } });
+      this.logger.warn('Password recovery delivery failed; reset credential invalidated');
+    }
+    return response;
   }
 
   async resetPassword(token: string, newPassword: string) {
+    if (!/^[a-f0-9]{64}$/i.test(token)) throw new BadRequestException('Password reset token is invalid or has expired');
     const user = await this.prisma.user.findFirst({
       where: {
         passwordResetToken: crypto.createHash('sha256').update(token).digest('hex'),
-        passwordResetExpiresAt: { gt: new Date() },
+        passwordResetExpiresAt: { gt: new Date() }, isBanned: false,
       },
     });
 
@@ -472,16 +490,18 @@ export class AuthService implements OnModuleInit {
 
     const changed = await this.prisma.user.updateMany({
       where: { id: user.id, passwordResetToken: crypto.createHash('sha256').update(token).digest('hex'),
-        passwordResetExpiresAt: { gt: new Date() } },
+        passwordResetExpiresAt: { gt: new Date() }, isBanned: false },
       data: {
         passwordHash,
         passwordResetToken: null,
         passwordResetExpiresAt: null,
         refreshTokenHash: null,
+        tokenVersion: { increment: 1 },
       },
     });
 
     if (changed.count !== 1) throw new BadRequestException('Password reset token is invalid or has expired');
+    await this.prisma.userSession.updateMany({ where: { userId: user.id }, data: { isRevoked: true } });
 
     return { success: true, message: 'Password has been successfully updated. You may now log in.' };
   }
@@ -560,18 +580,19 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
-    if (!user || user.isBanned || user.twoFactorEnabled || !user.refreshTokenHash) {
+    if (!user || user.isBanned || user.twoFactorEnabled || !user.refreshTokenHash ||
+        (payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
       throw new UnauthorizedException('Access denied - session invalidated');
     }
     const preHashed = crypto.createHash('sha256').update(refreshToken).digest('hex');
     if (!(await bcrypt.compare(preHashed, user.refreshTokenHash))) {
       throw new UnauthorizedException('Refresh token has already been used or revoked');
     }
-    const tokens = await this.generateTokens(user.id, user.email, user.globalRole);
+    const tokens = await this.generateTokens(user.id, user.email, user.globalRole, user.tokenVersion ?? 0);
     const nextHash = await this.hashRefreshToken(tokens.refreshToken);
     // Only one concurrent request can consume the stored refresh credential.
     const claimed = await this.prisma.user.updateMany({
-      where: { id: user.id, refreshTokenHash: user.refreshTokenHash, isBanned: false, twoFactorEnabled: false },
+      where: { id: user.id, refreshTokenHash: user.refreshTokenHash, isBanned: false, twoFactorEnabled: false, tokenVersion: user.tokenVersion ?? 0 },
       data: { refreshTokenHash: nextHash },
     });
     if (claimed.count !== 1) throw new UnauthorizedException('Refresh token has already been used or revoked');
@@ -579,7 +600,8 @@ export class AuthService implements OnModuleInit {
   }
 
   async logout(userId: string) {
-    await this.prisma.user.updateMany({ where: { id: userId }, data: { refreshTokenHash: null } });
+    await this.prisma.user.updateMany({ where: { id: userId }, data: { refreshTokenHash: null, tokenVersion: { increment: 1 } } });
+    await this.prisma.userSession.updateMany({ where: { userId }, data: { isRevoked: true } });
     return { success: true, message: 'Logged out successfully' };
   }
 
@@ -590,7 +612,9 @@ export class AuthService implements OnModuleInit {
       const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
       const preHashed = crypto.createHash('sha256').update(refreshToken).digest('hex');
       if (user?.refreshTokenHash && await bcrypt.compare(preHashed, user.refreshTokenHash)) {
-        await this.prisma.user.updateMany({ where: { id: user.id, refreshTokenHash: user.refreshTokenHash }, data: { refreshTokenHash: null } });
+        const changed = await this.prisma.user.updateMany({ where: { id: user.id, refreshTokenHash: user.refreshTokenHash },
+          data: { refreshTokenHash: null, tokenVersion: { increment: 1 } } });
+        if (changed.count === 1) await this.prisma.userSession.updateMany({ where: { userId: user.id }, data: { isRevoked: true } });
       }
     } catch { /* Logout is intentionally idempotent. */ }
     return { success: true, message: 'Logged out successfully' };
@@ -652,7 +676,7 @@ export class AuthService implements OnModuleInit {
 
   async changePassword(userId: string, oldPass: string, newPass: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.passwordHash) {
+    if (!user || user.isBanned || !user.passwordHash) {
       throw new BadRequestException('User does not have a local password set');
     }
     const isMatch = await bcrypt.compare(oldPass, user.passwordHash);
@@ -661,10 +685,12 @@ export class AuthService implements OnModuleInit {
     }
     const salt = await bcrypt.genSalt(12);
     const passwordHash = await bcrypt.hash(newPass, salt);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash, refreshTokenHash: null },
+    const changed = await this.prisma.user.updateMany({
+      where: { id: userId, passwordHash: user.passwordHash, tokenVersion: user.tokenVersion ?? 0, isBanned: false },
+      data: { passwordHash, refreshTokenHash: null, tokenVersion: { increment: 1 }, passwordResetToken: null, passwordResetExpiresAt: null },
     });
+    if (changed.count !== 1) throw new UnauthorizedException('Account credentials changed; sign in again');
+    await this.prisma.userSession.updateMany({ where: { userId }, data: { isRevoked: true } });
     return { success: true, message: 'Password changed successfully. Please log in again.' };
   }
 
@@ -805,8 +831,8 @@ export class AuthService implements OnModuleInit {
     return { success: true, message: 'Account permanently deleted' };
   }
 
-  private async generateTokens(userId: string, email: string, role: string) {
-    const claims = { sub: userId, email, role };
+  private async generateTokens(userId: string, email: string, role: string, tokenVersion = 0) {
+    const claims = { sub: userId, email, role, tokenVersion };
     const options = { algorithm: 'HS256' as const, issuer: TOKEN_ISSUER, audience: TOKEN_AUDIENCE };
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync({ ...claims, purpose: 'access' }, {
@@ -821,7 +847,9 @@ export class AuthService implements OnModuleInit {
     return bcrypt.hash(crypto.createHash('sha256').update(refreshToken).digest('hex'), 10);
   }
 
-  private async updateRefreshToken(userId: string, refreshToken: string) {
-    await this.prisma.user.update({ where: { id: userId }, data: { refreshTokenHash: await this.hashRefreshToken(refreshToken) } });
+  private async updateRefreshToken(userId: string, refreshToken: string, tokenVersion = 0) {
+    const claimed = await this.prisma.user.updateMany({ where: { id: userId, tokenVersion, isBanned: false, twoFactorEnabled: false },
+      data: { refreshTokenHash: await this.hashRefreshToken(refreshToken) } });
+    if (claimed.count !== 1) throw new UnauthorizedException('Account credentials changed; sign in again');
   }
 }

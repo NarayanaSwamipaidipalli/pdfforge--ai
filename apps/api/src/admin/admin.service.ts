@@ -1,4 +1,5 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -87,36 +88,58 @@ export class AdminService {
     return { users, total };
   }
 
-  async updateUserRole(userId: string, role: string) {
+  async updateUserRole(userId: string, role: string, actorId: string) {
     const validRoles = ['USER', 'SUPPORT', 'ADMIN', 'SUPERADMIN'];
     if (!validRoles.includes(role)) {
       throw new BadRequestException(`Invalid role: ${role}`);
     }
 
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: { globalRole: role as any },
-    });
+    const user = await this.manageAccount(userId, actorId, 'role', { globalRole: role });
 
     return { success: true, user: { id: user.id, email: user.email, role: user.globalRole } };
   }
 
-  async banUser(userId: string, reason: string) {
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: { isBanned: true, banReason: reason || 'Violation of terms of service' },
-    });
+  async banUser(userId: string, reason: string, actorId: string) {
+    const user = await this.manageAccount(userId, actorId, 'ban', { isBanned: true, banReason: String(reason || 'Terms violation').slice(0, 500) });
 
     return { success: true, message: `User ${user.email} has been suspended.` };
   }
 
-  async unbanUser(userId: string) {
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: { isBanned: false, banReason: null },
-    });
+  async unbanUser(userId: string, actorId: string) {
+    const user = await this.manageAccount(userId, actorId, 'unban', { isBanned: false, banReason: null });
 
     return { success: true, message: `User ${user.email} suspension lifted.` };
+  }
+
+  private async manageAccount(userId: string, actorId: string, action: string, data: any) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.prisma.$transaction(async tx => {
+          const actor = await tx.user.findUnique({ where: { id: actorId } });
+          const target = await tx.user.findUnique({ where: { id: userId } });
+          if (!actor || actor.isBanned || !['ADMIN', 'SUPERADMIN'].includes(actor.globalRole)) throw new ForbiddenException('Administrative access required');
+          if (!target) throw new NotFoundException('User not found');
+          if (actor.id === target.id) throw new BadRequestException('Self-modification of administrative access is not allowed');
+          if ((action === 'role' || ['ADMIN', 'SUPERADMIN'].includes(target.globalRole)) && actor.globalRole !== 'SUPERADMIN') {
+            throw new ForbiddenException('Only a super administrator can manage administrative roles or accounts');
+          }
+          if (target.globalRole === 'SUPERADMIN' && !target.isBanned && (action === 'ban' || data.globalRole && data.globalRole !== 'SUPERADMIN')) {
+            const active = await tx.user.count({ where: { globalRole: 'SUPERADMIN', isBanned: false } });
+            if (active <= 1) throw new ConflictException('The last active super administrator must be preserved');
+          }
+          const updated = await tx.user.update({ where: { id: userId }, data: {
+            ...data, refreshTokenHash: null, tokenVersion: { increment: 1 },
+          } });
+          await tx.userSession.updateMany({ where: { userId }, data: { isRevoked: true } });
+          await tx.auditLog.create({ data: { userId: actorId, action: `ADMIN_${action.toUpperCase()}`,
+            resource: userId, metadata: { role: updated.globalRole, isBanned: updated.isBanned } } });
+          return updated;
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      } catch (error) {
+        if ((error as any).code === 'P2034' && attempt < 3) continue;
+        throw error;
+      }
+    }
   }
 
   async getAllJobs(limit = 50, offset = 0, status?: string, tool?: string) {

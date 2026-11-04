@@ -206,6 +206,7 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset email token' })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -213,6 +214,7 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password with verification token' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
@@ -269,6 +271,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh expired JWT access token' })
   async refresh(

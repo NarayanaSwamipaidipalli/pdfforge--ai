@@ -209,7 +209,7 @@ function LoginForm() {
             <FileCheck2 className="w-6 h-6" />
           </div>
           <span className="font-semibold text-xl tracking-tight text-zinc-900 dark:text-white flex items-center gap-1.5">
-            PDFForge <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-medium border border-blue-200 dark:border-blue-900">AI</span>
+            Doxera
           </span>
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
@@ -350,7 +350,7 @@ function LoginForm() {
 
           {/* Create Account Link Footer */}
           <div className="pt-2 text-center text-xs text-zinc-500 dark:text-zinc-400 border-t border-zinc-100 dark:border-zinc-800">
-            <span>New to PDFForge AI? </span>
+            <span>New to Doxera? </span>
             <Link
               href="/signup"
               className="font-semibold text-blue-600 dark:text-blue-400 hover:underline"

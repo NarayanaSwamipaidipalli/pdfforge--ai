@@ -1,6 +1,6 @@
 # @pdfforge/sdk
 
-Official Node.js & TypeScript SDK for the **PDFForge AI – Enterprise PDF Intelligence Platform**.
+Official Node.js & TypeScript SDK for the **Doxera – Enterprise PDF Intelligence Platform**.
 
 ## Installation
 
@@ -21,7 +21,7 @@ import * as fs from 'fs';
 // Initialize with API Key
 const client = new PDFForgeClient({
   apiKey: process.env.PDFFORGE_API_KEY,
-  baseUrl: 'https://api.pdfforge.ai/api/v1', // or http://localhost:4000/api/v1 for local
+  baseUrl: 'https://api.doxera.in/api/v1', // or http://localhost:4000/api/v1 for local
 });
 
 async function main() {

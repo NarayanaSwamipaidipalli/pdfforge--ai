@@ -457,7 +457,7 @@ export class BillingService {
       await this.prisma.billingOrder.update({ where: { id: order.id }, data: { providerOrderId: remote.id } });
       return { provider, orderId: remote.id, amount: amountMinor, currency,
         keyId: this.configService.get<string>('RAZORPAY_KEY_ID'), tier, interval,
-        user: { name: user.name || 'PDFForge Member', email: user.email } };
+        user: { name: user.name || 'Doxera Member', email: user.email } };
     }
     if (provider === 'paypal') {
       const remote = await this.paypalRequest('post', '/v2/checkout/orders', {
@@ -477,7 +477,7 @@ export class BillingService {
     try {
       session = await this.stripe.checkout.sessions.create({
         mode: 'subscription', payment_method_types: ['card'], customer_email: user.email,
-        line_items: [{ price_data: { currency: 'usd', product_data: { name: `PDFForge AI ${tier}` },
+        line_items: [{ price_data: { currency: 'usd', product_data: { name: `Doxera ${tier}` },
           unit_amount: amountMinor, recurring: { interval: interval === 'yearly' ? 'year' : 'month' } }, quantity: 1 }],
         success_url: `${origin}/billing?session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${origin}/pricing?canceled=true`,
         metadata: { billingOrderId: order.id }, subscription_data: { metadata: { billingOrderId: order.id } },
@@ -604,9 +604,17 @@ export class BillingService {
     return this.atomic(async (tx) => {
       // Recognize old rows too, while namespacing all new provider event identifiers.
       const existing = await tx.webhookEvent.findFirst({ where: { provider, eventId: { in: [eventId, key] } } });
-      if (existing) return { received: true, duplicate: true };
+      const digest = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+      if (existing) {
+        const prior = existing.payload as { sha256?: string } | null;
+        if (existing.eventType !== type || prior?.sha256 && prior.sha256 !== digest) {
+          throw new ConflictException('Webhook event identifier was reused with different content');
+        }
+        if (existing.status !== 'PROCESSED') throw new ServiceUnavailableException('Prior webhook processing requires reconciliation');
+        return { received: true, duplicate: true };
+      }
       await tx.webhookEvent.create({ data: { eventId: key, provider, eventType: type,
-        payload: { sha256: crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex') }, status: 'PROCESSED' } });
+        payload: { sha256: digest }, status: 'PROCESSED' } });
       await apply(tx);
       return { received: true };
     });
@@ -620,6 +628,8 @@ export class BillingService {
     if (!sub) throw new NotFoundException('No matching provider subscription');
     if (sub.status === 'CANCELED' && status !== 'CANCELED') return;
     if (sub.lastProviderEventAt && (at < sub.lastProviderEventAt || (at.getTime() === sub.lastProviderEventAt.getTime() && sub.status === 'CANCELED'))) return;
+    // Provider timestamps have second precision. An ambiguous replay cannot restore access.
+    if (sub.lastProviderEventAt?.getTime() === at.getTime() && sub.status === 'PAST_DUE' && status === 'ACTIVE') return;
     if (status === 'ACTIVE' && !period && sub.currentPeriodEnd <= new Date()) return;
     await tx.subscription.update({ where: { id: sub.id }, data: {
       status, lastProviderEventAt: at,
@@ -844,7 +854,7 @@ export class BillingService {
   ): Buffer {
     const cleanCustomer = customerName.replace(/[^\x20-\x7E]|[()\\]/g, '');
     const dateStr = new Date().toISOString().slice(0, 10);
-    const stream = `BT /F1 16 Tf 50 740 Td (PDFForge AI - Official Tax Invoice) Tj ET
+    const stream = `BT /F1 16 Tf 50 740 Td (Doxera - Official Tax Invoice) Tj ET
 BT /F1 12 Tf 50 700 Td (Invoice Reference: ${invoiceNumber}) Tj ET
 BT /F1 12 Tf 50 675 Td (Billed To: ${cleanCustomer}) Tj ET
 BT /F1 12 Tf 50 650 Td (Plan Tier: ${planTier}) Tj ET
@@ -852,7 +862,7 @@ BT /F1 12 Tf 50 625 Td (Total Amount Paid: ${amount.toFixed(2)} ${currency}) Tj 
 BT /F1 12 Tf 50 600 Td (Payment Status: COMPLETED / PAID) Tj ET
 BT /F1 12 Tf 50 575 Td (Issue Date: ${dateStr}) Tj ET
 BT /F1 10 Tf 50 530 Td (Payment receipt for the recorded transaction.) Tj ET
-BT /F1 10 Tf 50 510 Td (Thank you for subscribing to PDFForge AI Enterprise SaaS Cloud.) Tj ET`;
+BT /F1 10 Tf 50 510 Td (Thank you for subscribing to Doxera Enterprise SaaS Cloud.) Tj ET`;
 
     const pdf = `%PDF-1.4
 1 0 obj

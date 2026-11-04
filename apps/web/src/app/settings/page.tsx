@@ -287,7 +287,7 @@ export default function SettingsPage() {
                   <input
                     type="email"
                     disabled
-                    value={user?.email || 'user@pdfforge.ai'}
+                    value={user?.email || 'user@doxera.in'}
                     className="w-full px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
                   />
                 </div>

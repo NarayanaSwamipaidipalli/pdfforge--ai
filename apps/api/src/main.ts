@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import helmet from 'helmet';
 import { corsOriginCheck, corsOrigins } from './common/environment';
+import { monitoringPrivacy } from './common/monitoring';
 
 let Sentry: any = null;
 try {
@@ -50,6 +51,7 @@ async function bootstrap() {
   if (sentryDsn && Sentry && typeof Sentry.init === 'function') {
     try {
       Sentry.init({
+        ...monitoringPrivacy,
         dsn: sentryDsn,
         environment: process.env.NODE_ENV || 'development',
         tracesSampleRate: 0.1,
@@ -64,7 +66,7 @@ async function bootstrap() {
     return intVal <= Number.MAX_SAFE_INTEGER ? intVal : this.toString();
   };
 
-  const logger = new Logger('PDFForge-APIGateway');
+  const logger = new Logger('Doxera-APIGateway');
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
     logger: structuredLogger,
@@ -98,9 +100,9 @@ async function bootstrap() {
 
   // OpenAPI / Swagger Documentation
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('PDFForge AI - Enterprise API')
+    .setTitle('Doxera - Enterprise API')
     .setDescription(
-      'Cloud-scale PDF processing and document intelligence REST & GraphQL API specifications',
+      'PDF processing and document intelligence REST API specifications',
     )
     .setVersion('1.0.0')
     .addBearerAuth()
@@ -124,7 +126,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 4000;
   await app.listen(port);
-  logger.log(`🚀 PDFForge AI API Gateway is active on: http://localhost:${port}`);
+  logger.log(`🚀 Doxera API Gateway is active on: http://localhost:${port}`);
   logger.log(`📑 OpenAPI Documentation available at: http://localhost:${port}/api/docs`);
 }
 

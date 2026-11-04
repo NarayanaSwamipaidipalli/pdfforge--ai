@@ -1,7 +1,7 @@
 {
   "name": "@pdfforge/sdk",
   "version": "1.0.0",
-  "description": "Official Node.js & TypeScript SDK for PDFForge AI Enterprise Platform",
+  "description": "Official Node.js & TypeScript SDK for Doxera Enterprise Platform",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -19,7 +19,7 @@
     "pdf-processing",
     "sdk"
   ],
-  "author": "PDFForge AI Architecture Team",
+  "author": "Doxera Architecture Team",
   "license": "Apache-2.0",
   "dependencies": {},
   "devDependencies": {

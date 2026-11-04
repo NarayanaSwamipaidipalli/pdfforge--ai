@@ -44,7 +44,7 @@ export default function ForgotPasswordPage() {
             <FileCheck2 className="w-6 h-6" />
           </div>
           <span className="font-semibold text-xl tracking-tight text-zinc-900">
-            PDFForge AI
+            Doxera
           </span>
         </Link>
         <h2 className="text-2xl font-semibold tracking-tight text-zinc-900">
@@ -88,7 +88,7 @@ export default function ForgotPasswordPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@pdfforge.ai"
+                placeholder="admin@doxera.in"
                 className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
               />
             </div>

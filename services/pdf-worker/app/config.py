@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Read explicitly injected environment only. Docker/Render own secret loading.
     model_config = SettingsConfigDict(extra="ignore", hide_input_in_errors=True)
 
-    APP_NAME: str = "PDFForge AI Worker Engine"
+    APP_NAME: str = "Doxera Worker Engine"
     ENVIRONMENT: str = Field(
         default="development", validation_alias=AliasChoices("ENVIRONMENT", "NODE_ENV")
     )

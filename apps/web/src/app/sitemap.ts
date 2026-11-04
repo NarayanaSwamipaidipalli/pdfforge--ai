@@ -2,7 +2,7 @@ import { MetadataRoute } from 'next';
 import { PDF_TOOLS } from '@/lib/tools-registry';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://pdfforge.ai';
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://doxera.in';
 
   const toolRoutes = PDF_TOOLS.map((tool) => ({
     url: `${baseUrl}/tools/${tool.slug}`,

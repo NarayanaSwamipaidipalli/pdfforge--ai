@@ -24,7 +24,7 @@ try {
     let auditFailure;
     try {
       command('docker', [...common, '--env', 'ENVIRONMENT=test', '--entrypoint', 'sh', tag, '-c',
-        'python -m pip install --disable-pip-version-check --no-cache-dir --target /tmp/auditor pip-audit >/tmp/auditor-install.log 2>&1 && PYTHONPATH=/tmp/auditor python -m pip_audit --format json --output /tmp/worker-audit.json'], {}, { combinedOutput: true });
+        'python -m pip freeze --all >/tmp/production-requirements.txt && python -m pip install --disable-pip-version-check --no-cache-dir --target /tmp/auditor pip-audit >/tmp/auditor-install.log 2>&1 && PYTHONPATH=/tmp/auditor python -m pip_audit --requirement /tmp/production-requirements.txt --no-deps --disable-pip --format json --output /tmp/worker-audit.json'], {}, { combinedOutput: true });
     } catch (error) { auditFailure = error; }
     const target = resolve(root, '.remediation/worker-audit.json');
     command('docker', ['cp', `${name}:/tmp/worker-audit.json`, target]);

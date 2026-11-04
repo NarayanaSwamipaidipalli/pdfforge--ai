@@ -74,7 +74,7 @@ export default function ToolPage({ params }: ToolPageProps) {
         a: `Yes, ${tool?.name} is completely available under the Starter Community tier with zero credit card required for standard file sizes up to 25 MB.`,
       },
       {
-        q: 'How does PDFForge AI guarantee document confidentiality?',
+        q: 'How does Doxera guarantee document confidentiality?',
         a: 'We strictly enforce a Zero-Permanent-Retention architecture. Files are processed in ephemeral memory buffers and automatically expunged after completion under DoD 5220.22-M sanitation standards.',
       },
       {

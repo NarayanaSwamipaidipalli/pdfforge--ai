@@ -118,7 +118,7 @@ export const Navbar = () => {
           </div>
           <div className="flex flex-col">
             <span className="font-semibold text-lg tracking-tight text-zinc-900 dark:text-white flex items-center gap-1.5">
-              PDFForge <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-medium border border-blue-200 dark:border-blue-900">AI</span>
+              Doxera
             </span>
           </div>
         </Link>

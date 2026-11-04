@@ -16,6 +16,7 @@ const { BillingController } = require('/app/dist/billing/billing.controller.js')
 const { effectivePlan, reserveAiUsage } = require('/app/dist/common/effective-plan.js');
 const { FilesService } = require('/app/dist/files/files.service.js');
 const { PdfJobsService } = require('/app/dist/pdf-jobs/pdf-jobs.service.js');
+const { PrismaService } = require('/app/dist/prisma/prisma.service.js');
 
 const url = new URL(process.env.DATABASE_URL);
 if (!/^pdfforge-security-\d+-[a-f0-9]{8}-postgres$/.test(url.hostname) ||
@@ -52,6 +53,7 @@ let origin;
 let passed = 0;
 function pass(label) { passed++; console.log(`PASS: ${label}`); }
 const seconds = () => Math.floor(Date.now() / 1000);
+const capturedEventTime = seconds();
 const hmac = (body, secret) => crypto.createHmac('sha256', secret).update(body).digest('hex');
 async function webhook(payload, id, signature, path = 'razorpay') {
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -60,7 +62,7 @@ async function webhook(payload, id, signature, path = 'razorpay') {
     'x-razorpay-signature': signature ?? hmac(body, process.env.RAZORPAY_WEBHOOK_SECRET),
   }, body });
 }
-function payload(payment, event = 'payment.captured', at = seconds()) {
+function payload(payment, event = 'payment.captured', at = capturedEventTime) {
   return { event, created_at: at, payload: { payment: { entity: payment } } };
 }
 function payment(orderId, overrides = {}) {
@@ -84,6 +86,7 @@ async function callback(userId, remote, extra = {}) {
   Module({ controllers: [BillingController], providers: [
     { provide: BillingService, useValue: billing }, { provide: ConfigService, useValue: config },
     { provide: JwtService, useValue: new JwtService() },
+    { provide: PrismaService, useValue: prisma },
   ] })(BillingTestModule);
   app = await NestFactory.create(BillingTestModule, { rawBody: true, logger: false });
   await app.listen(0, '127.0.0.1');

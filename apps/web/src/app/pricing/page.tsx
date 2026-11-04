@@ -124,7 +124,7 @@ export default function PricingPage() {
         'Unlimited team seats & storage',
         'Dedicated worker pod cluster',
         'Single Sign-On (SAML / Okta / Azure AD)',
-        'Signed BAA for HIPAA / SOC2 compliance',
+        'Deployment security review',
         'Custom LLM & fine-tuned RAG models',
         'Dedicated solutions architect',
       ],

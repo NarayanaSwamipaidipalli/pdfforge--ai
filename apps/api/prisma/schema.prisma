@@ -80,6 +80,7 @@ model User {
   twoFactorEnabled Boolean      @default(false)
   twoFactorSecret  String?
   refreshTokenHash String?
+  tokenVersion     Int          @default(0)
   isBanned         Boolean      @default(false)
   banReason        String?
   
@@ -109,6 +110,20 @@ model User {
   @@index([email])
   @@index([plan])
   @@map("users")
+}
+
+// State is consumed atomically; OAuth replay records contain no provider tokens.
+model OAuthState {
+  id          String   @id @default(uuid())
+  stateHash   String   @unique
+  userId      String?
+  redirectUri String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("oauth_states")
 }
 
 model Organization {

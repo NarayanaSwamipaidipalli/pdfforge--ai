@@ -142,7 +142,7 @@ describe('Billing security', () => {
   });
 
   it('makes already processed provider events a no-op', async () => {
-    prisma.webhookEvent.findFirst.mockResolvedValue({ eventId: 'razorpay:evt_existing' });
+    prisma.webhookEvent.findFirst.mockResolvedValue({ eventId: 'razorpay:evt_existing', eventType: event().event, status: 'PROCESSED', payload: null });
     expect(await service.handleRazorpayWebhook(event(), 'evt_existing')).toEqual({ received: true, duplicate: true });
     expect(prisma.billingOrder.findUnique).not.toHaveBeenCalled(); expect(prisma.invoice.create).not.toHaveBeenCalled();
   });
@@ -169,6 +169,23 @@ describe('Billing security', () => {
     expect(prisma.payment.create).not.toHaveBeenCalled();
     await expect(service.capturePayPalOrder('user_1', { orderId: 'order_security', tier: SubscriptionTier.ENTERPRISE })).rejects.toThrow(ServiceUnavailableException);
     await expect(service.verifyPayPalWebhook(Buffer.from('{}'), {})).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects reused event identities with changed content and incomplete legacy events', async () => {
+    prisma.webhookEvent.findFirst.mockResolvedValue({ eventType: 'payment.captured', status: 'PROCESSED', payload: { sha256: 'different' } });
+    await expect(service.handleRazorpayWebhook(event(), 'evt_collision')).rejects.toThrow('different content');
+    prisma.webhookEvent.findFirst.mockResolvedValue({ eventType: 'payment.captured', status: 'FAILED', payload: null });
+    await expect(service.handleRazorpayWebhook(event(), 'evt_incomplete')).rejects.toThrow(ServiceUnavailableException);
+    expect(prisma.payment.create).not.toHaveBeenCalled();
+  });
+
+  it('does not restore access from an ambiguous same-second lifecycle replay', async () => {
+    prisma.subscription.findFirst.mockResolvedValue({ id: 'sub_actual', userId: 'user_1', status: 'PAST_DUE',
+      currentPeriodEnd: new Date(Date.now() + 100000), lastProviderEventAt: new Date(seconds() * 1000) });
+    await service.handleRazorpayWebhook({ event: 'subscription.resumed', created_at: seconds(), payload: {
+      subscription: { entity: { id: 'sub_real_provider' } },
+    } }, 'evt_ambiguous');
+    expect(prisma.subscription.update).not.toHaveBeenCalled();
   });
 
   it('binds Stripe fulfillment to its stored order and deduplicates the initial paid invoice', async () => {

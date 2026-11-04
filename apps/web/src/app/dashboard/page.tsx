@@ -599,7 +599,7 @@ export default function DashboardPage() {
                   Active Subscription
                 </span>
                 <h3 className="text-xl font-bold text-zinc-900 mt-2">
-                  PDFForge AI {user?.plan || 'PRO'} Tier
+                  Doxera {user?.plan || 'PRO'} Tier
                 </h3>
                 <p className="text-xs text-zinc-500 mt-1">
                   Enjoy unlimited daily conversions, OCR, 500MB+ file uploads, and full document intelligence.

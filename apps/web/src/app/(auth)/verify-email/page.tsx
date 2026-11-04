@@ -50,7 +50,7 @@ function VerifyEmailContent() {
       }
 
       setVerified(true);
-      addToast('Email verified successfully! Welcome to PDFForge AI.', 'success');
+      addToast('Email verified successfully! Welcome to Doxera.', 'success');
     } catch (err: any) {
       setError(err.message || 'Email verification failed.');
       addToast(err.message || 'Verification error', 'error');
@@ -67,7 +67,7 @@ function VerifyEmailContent() {
             <FileCheck2 className="w-6 h-6" />
           </div>
           <span className="font-semibold text-xl tracking-tight text-zinc-900">
-            PDFForge AI
+            Doxera
           </span>
         </Link>
         <h2 className="text-2xl font-semibold tracking-tight text-zinc-900">
@@ -95,7 +95,7 @@ function VerifyEmailContent() {
               <div>
                 <h3 className="text-sm font-semibold text-emerald-950">Email Successfully Verified</h3>
                 <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
-                  Your identity has been confirmed. You now have full access to PDFForge AI tools, batch processing, and API keys.
+                  Your identity has been confirmed. You now have full access to Doxera tools, batch processing, and API keys.
                 </p>
               </div>
               <div className="pt-2 flex flex-col gap-2">

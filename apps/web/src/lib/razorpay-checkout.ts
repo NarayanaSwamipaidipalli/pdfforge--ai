@@ -22,7 +22,7 @@ export async function completeRazorpayCheckout(order: any, token: string): Promi
     let finished = false;
     const checkout = new (window as any).Razorpay({
       key: order.keyId, order_id: order.orderId, amount: order.amount, currency: order.currency,
-      name: 'PDFForge AI', prefill: order.user || {},
+      name: 'Doxera', prefill: order.user || {},
       handler: async (payment: any) => {
         finished = true;
         try {

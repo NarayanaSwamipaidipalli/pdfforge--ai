@@ -12,7 +12,7 @@ export default function ErrorBoundary({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error('Captured by PDFForge Error Boundary:', error);
+    console.error('Captured by Doxera Error Boundary:', error);
   }, [error]);
 
   return (

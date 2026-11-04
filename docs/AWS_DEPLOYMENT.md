@@ -1,4 +1,4 @@
-# PDFForge AI – AWS Cloud Enterprise Deployment Guide
+# Doxera – AWS Cloud Enterprise Deployment Guide
 ## Production Setup on AWS EKS, Aurora Serverless, ElastiCache, S3 & CloudFront
 
 ---
@@ -103,4 +103,4 @@ kubectl run prisma-migrate --rm -i --tty \
 
 ### 6. CloudFront CDN & Domain Routing
 
-Route Route53 alias records (`pdfforge.ai` and `*.pdfforge.ai`) to the AWS ALB Ingress controller or CloudFront distribution with Origin Access Identity (OAI) for S3 downloads.
+Route Route53 alias records (`doxera.in` and `*.doxera.in`) to the AWS ALB Ingress controller or CloudFront distribution with Origin Access Identity (OAI) for S3 downloads.

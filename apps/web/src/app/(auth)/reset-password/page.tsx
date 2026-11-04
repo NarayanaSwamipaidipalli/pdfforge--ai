@@ -82,7 +82,7 @@ function ResetPasswordForm() {
             <FileCheck2 className="w-6 h-6" />
           </div>
           <span className="font-semibold text-xl tracking-tight text-zinc-900">
-            PDFForge AI
+            Doxera
           </span>
         </Link>
         <h2 className="text-2xl font-semibold tracking-tight text-zinc-900">

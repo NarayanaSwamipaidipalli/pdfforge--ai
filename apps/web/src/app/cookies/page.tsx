@@ -25,7 +25,7 @@ export default function CookiesPage() {
             Cookie Policy & Tracking Preferences
           </h1>
           <p className="text-xs text-zinc-500 mt-2">
-            Control which cookies and local storage tokens are active during your PDFForge AI sessions.
+            Control which cookies and local storage tokens are active during your Doxera sessions.
           </p>
         </div>
 

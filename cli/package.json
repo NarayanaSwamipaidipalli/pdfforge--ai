@@ -1,7 +1,7 @@
 {
   "name": "pdfforge-cli",
   "version": "1.0.0",
-  "description": "Official CLI for PDFForge AI Enterprise Platform",
+  "description": "Official CLI for Doxera Enterprise Platform",
   "bin": {
     "pdfforge": "./dist/cli.js"
   },
@@ -10,8 +10,14 @@
     "build": "tsc",
     "start": "node dist/cli.js"
   },
-  "keywords": ["pdfforge", "pdf", "cli", "ai", "ocr"],
-  "author": "PDFForge AI Architecture Team",
+  "keywords": [
+    "pdfforge",
+    "pdf",
+    "cli",
+    "ai",
+    "ocr"
+  ],
+  "author": "Doxera Architecture Team",
   "license": "Apache-2.0",
   "dependencies": {
     "commander": "^12.1.0"

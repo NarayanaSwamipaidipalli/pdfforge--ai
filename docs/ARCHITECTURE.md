@@ -1,11 +1,11 @@
-# PDFForge AI – Enterprise PDF Intelligence Platform
+# Doxera – Enterprise PDF Intelligence Platform
 ## Complete System Architecture & Engineering Blueprint
 
 ---
 
 ### 1. Executive Summary & Architectural Overview
 
-PDFForge AI is an enterprise-grade cloud-native PDF processing and document intelligence SaaS platform engineered to process high-throughput document workloads (millions of users and billions of pages per month). It integrates traditional deterministic document manipulation (rasterization, lossless compression, OCR, conversion) with non-deterministic Generative AI (RAG, semantic search, structured extraction, automated compliance analysis).
+Doxera is an enterprise-grade cloud-native PDF processing and document intelligence SaaS platform engineered to process high-throughput document workloads (millions of users and billions of pages per month). It integrates traditional deterministic document manipulation (rasterization, lossless compression, OCR, conversion) with non-deterministic Generative AI (RAG, semantic search, structured extraction, automated compliance analysis).
 
 The system is architected as an asynchronous event-driven microservices ecosystem decoupled via Redis/Celery message brokers, backed by distributed object storage (AWS S3 with CloudFront CDN), a relational PostgreSQL transactional engine, and an ephemeral processing cluster.
 
@@ -74,7 +74,7 @@ graph TD
 
 ### 3. File Processing & Ephemeral Security Lifecycle
 
-To adhere to enterprise compliance (GDPR, HIPAA, SOC2 Type II), PDFForge AI operates a **Zero-Permanent-Storage Principle** for non-archived user documents:
+To adhere to enterprise compliance (GDPR, HIPAA, SOC2 Type II), Doxera operates a **Zero-Permanent-Storage Principle** for non-archived user documents:
 
 ```mermaid
 sequenceDiagram
@@ -144,7 +144,7 @@ flowchart TD
 
 ### 5. Multi-Tenant Organization & Access Control (RBAC)
 
-PDFForge AI enforces a hierarchical multi-tenant structure:
+Doxera enforces a hierarchical multi-tenant structure:
 - **Platform SuperAdmin**: Global system monitoring, telemetry, abuse flags, tenant overrides.
 - **Organization Owner**: Billing, plan upgrades, enterprise SSO configuration, API key generation.
 - **Organization Admin**: Member invitations, workspace management, team quotas.

@@ -3,8 +3,8 @@ import Link from 'next/link';
 import { Calendar, Clock, ArrowRight, Sparkles, BookOpen } from 'lucide-react';
 
 export const metadata = {
-  title: 'Engineering Blog – PDFForge AI Systems & RAG Architecture',
-  description: 'Technical articles, architecture deep-dives, and performance benchmarks from the PDFForge AI engineering team.',
+  title: 'Engineering Blog – Doxera Systems & RAG Architecture',
+  description: 'Technical articles, architecture deep-dives, and performance benchmarks from the Doxera engineering team.',
 };
 
 export default function BlogPage() {
@@ -49,7 +49,7 @@ export default function BlogPage() {
         {/* Header */}
         <div className="text-center max-w-2xl mx-auto">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
-            PDFForge Engineering & AI Research
+            Doxera Engineering & AI Research
           </span>
           <h1 className="text-3xl sm:text-5xl font-semibold text-zinc-900 tracking-tight mt-3 mb-4">
             Systems, AI & Infrastructure Blog
@@ -77,7 +77,7 @@ export default function BlogPage() {
           </p>
 
           <div className="pt-2 flex items-center justify-between text-xs text-zinc-400">
-            <span>By PDFForge Architecture Team · {posts[0].date}</span>
+            <span>By Doxera Architecture Team · {posts[0].date}</span>
             <span className="text-blue-400 font-semibold hover:underline flex items-center gap-1">
               Read Article <ArrowRight className="w-3.5 h-3.5" />
             </span>

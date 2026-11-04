@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="fitz")
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="PDFForge AI - PDF Processing Worker Engine",
+    title="Doxera - PDF Processing Worker Engine",
     version="1.0.0",
     docs_url=None if settings.ENVIRONMENT == "production" else "/docs",
     redoc_url=None if settings.ENVIRONMENT == "production" else "/redoc",

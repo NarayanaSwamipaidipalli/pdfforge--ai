@@ -75,7 +75,7 @@ export default function HomePage() {
       return;
     }
     setNewsletterSubscribed(true);
-    addToast('Thank you for subscribing to PDFForge AI updates!', 'success');
+    addToast('Thank you for subscribing to Doxera updates!', 'success');
   };
 
   const categories = [
@@ -91,7 +91,7 @@ export default function HomePage() {
       name: 'Elena Rostova',
       role: 'General Counsel',
       company: 'Apex Global Capital',
-      quote: 'PDFForge AI replaced three fragmented PDF tools and shaved 8 hours a week off our contract review cycle. The zero-data-retention guarantee was mandatory for our compliance auditors.',
+      quote: 'Doxera replaced three fragmented PDF tools and shaved 8 hours a week off our contract review cycle. The zero-data-retention guarantee was mandatory for our compliance auditors.',
       rating: 5,
     },
     {
@@ -112,7 +112,7 @@ export default function HomePage() {
 
   const faqs = [
     {
-      q: 'How does PDFForge AI guarantee document confidentiality and privacy?',
+      q: 'How does Doxera guarantee document confidentiality and privacy?',
       a: 'We enforce a Zero-Permanent-Storage policy. All uploaded and processed files are encrypted in-transit (TLS 1.3) and at-rest (AWS KMS AES-256). Files are held in ephemeral memory buffers and automatically purged via DoD 5220.22-M compliant shredding routines within 24 hours (or instantly upon user request).',
     },
     {
@@ -120,8 +120,8 @@ export default function HomePage() {
       a: 'Our AI pipeline utilizes dense semantic embeddings (OpenAI text-embedding-3) paired with pgvector HNSW indexing, alongside OpenAI GPT-4o for document synthesis, table extraction, and zero-shot invoice parsing.',
     },
     {
-      q: 'Can I integrate PDFForge AI into my own software or enterprise backend?',
-      a: 'Yes. PDFForge AI provides high-performance REST and GraphQL APIs with SDKs in Node.js, Python, Kotlin, and Swift. API keys can be provisioned in seconds from the User Dashboard.',
+      q: 'Can I integrate Doxera into my own software or enterprise backend?',
+      a: 'Yes. Doxera provides high-performance REST and GraphQL APIs with SDKs in Node.js, Python, Kotlin, and Swift. API keys can be provisioned in seconds from the User Dashboard.',
     },
     {
       q: 'What are the file size and batch limitations?',
@@ -144,7 +144,7 @@ export default function HomePage() {
           {/* Release Badge */}
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-900 text-blue-700 dark:text-blue-300 text-xs font-medium mb-6 animate-pulse">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>PDFForge AI 2.0 Live – Powered by GPT-4o Document Intelligence</span>
+            <span>Doxera 2.0 Live – Powered by GPT-4o Document Intelligence</span>
           </div>
 
           <h1 className="text-4xl sm:text-6xl font-semibold tracking-tight text-zinc-900 dark:text-white leading-[1.1] mb-6">
@@ -419,7 +419,7 @@ export default function HomePage() {
                 Converse with documents. Extract facts with verifiable citations.
               </h2>
               <p className="text-zinc-400 text-sm leading-relaxed mb-8">
-                PDFForge AI turns static PDFs into active knowledge graphs. Ask multi-page legal or financial questions and receive accurate answers with instant page-level bounding box citations.
+                Doxera turns static PDFs into active knowledge graphs. Ask multi-page legal or financial questions and receive accurate answers with instant page-level bounding box citations.
               </p>
 
               <div className="space-y-3.5">

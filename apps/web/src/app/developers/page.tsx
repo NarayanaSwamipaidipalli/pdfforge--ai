@@ -11,8 +11,8 @@ export default function DevelopersPage() {
   const [copied, setCopied] = useState(false);
 
   const codeSnippets = {
-    curl: `curl -X POST https://api.pdfforge.ai/api/v1/pdf/jobs \\
-  -H "Authorization: Bearer pdf_live_YOUR_API_KEY" \\
+    curl: `curl -X POST https://api.doxera.in/api/v1/pdf/jobs \\
+  -H "Authorization: Bearer $ACCESS_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
     "tool": "compress",
@@ -23,7 +23,7 @@ export default function DevelopersPage() {
     typescript: `import axios from 'axios';
 
 const client = axios.create({
-  baseURL: 'https://api.pdfforge.ai/api/v1',
+  baseURL: 'https://api.doxera.in/api/v1',
   headers: { Authorization: \`Bearer \${process.env.PDFFORGE_API_KEY}\` }
 });
 
@@ -49,7 +49,7 @@ payload = {
     "provider": "OLLAMA"
 }
 
-res = requests.post("https://api.pdfforge.ai/api/v1/ai/chat", json=payload, headers=headers)
+res = requests.post("https://api.doxera.in/api/v1/ai/chat", json=payload, headers=headers)
 print("Answer:", res.json()["answer"])
 print("Citations:", res.json()["citations"])`,
   };
@@ -70,7 +70,7 @@ print("Citations:", res.json()["citations"])`,
             Developer Ecosystem & Microservice API
           </span>
           <h1 className="text-3xl sm:text-5xl font-semibold text-zinc-900 tracking-tight mt-3 mb-4">
-            Build with PDFForge AI REST & GraphQL API
+            Build with Doxera REST & GraphQL API
           </h1>
           <p className="text-xs sm:text-sm text-zinc-500">
             Automate PDF transformations, OCR pipelines, and AI document intelligence directly from your microservices and CI/CD workflows.

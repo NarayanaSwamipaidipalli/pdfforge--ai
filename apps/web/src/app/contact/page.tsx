@@ -52,8 +52,8 @@ export default function ContactPage() {
                   <Mail className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
                   <div>
                     <div className="font-medium text-zinc-900">Enterprise Sales</div>
-                    <a href="mailto:sales@pdfforge.ai" className="text-zinc-500 hover:text-blue-600">
-                      sales@pdfforge.ai
+                    <a href="mailto:sales@doxera.in" className="text-zinc-500 hover:text-blue-600">
+                      sales@doxera.in
                     </a>
                   </div>
                 </div>
@@ -62,8 +62,8 @@ export default function ContactPage() {
                   <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
                   <div>
                     <div className="font-medium text-zinc-900">Security & Compliance</div>
-                    <a href="mailto:security@pdfforge.ai" className="text-zinc-500 hover:text-blue-600">
-                      security@pdfforge.ai
+                    <a href="mailto:security@doxera.in" className="text-zinc-500 hover:text-blue-600">
+                      security@doxera.in
                     </a>
                   </div>
                 </div>
@@ -81,7 +81,7 @@ export default function ContactPage() {
             <div className="p-6 rounded-3xl bg-zinc-900 text-white space-y-2">
               <div className="font-semibold text-xs text-blue-400">Headquarters</div>
               <div className="text-xs text-zinc-300">
-                PDFForge AI Technologies Inc.<br />
+                Doxera<br />
                 500 Technology Square, Suite 800<br />
                 San Francisco, CA 94107
               </div>

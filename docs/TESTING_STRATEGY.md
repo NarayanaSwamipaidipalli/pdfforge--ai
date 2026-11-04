@@ -1,4 +1,4 @@
-# PDFForge AI – Enterprise Testing Strategy & Load Verification
+# Doxera – Enterprise Testing Strategy & Load Verification
 ## Multi-Tier Quality Assurance, E2E Automation & High-Concurrency Benchmarking
 
 ---
@@ -34,7 +34,7 @@ class PDFForgeLoadUser(HttpUser):
     def on_start(self):
         # Authenticate simulated user session
         response = self.client.post("/api/v1/auth/login", json={
-            "email": f"load_user_{random.randint(1, 10000)}@test.pdfforge.ai",
+            "email": f"load_user_{random.randint(1, 10000)}@test.doxera.in",
             "password": "Password123!"
         })
         if response.status_code == 200:
@@ -90,7 +90,7 @@ locust -f tests/locustfile.py --headless -u 5000 -r 250 --run-time 10m --host ht
 ### 3. GitHub Actions Continuous Integration (CI/CD)
 
 ```yaml
-name: PDFForge AI CI/CD Pipeline
+name: Doxera CI/CD Pipeline
 
 on:
   push:

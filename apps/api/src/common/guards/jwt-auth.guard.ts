@@ -3,12 +3,14 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { tokenVerificationOptions, validTokenClaims } from '../../auth/token-policy';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -22,7 +24,14 @@ export class JwtAuthGuard implements CanActivate {
     try {
       const payload = await this.jwtService.verifyAsync(token, tokenVerificationOptions(this.configService, 'access'));
       if (!validTokenClaims(payload, 'access')) throw new UnauthorizedException();
-      request['user'] = payload;
+      const user = await this.prisma.user.findUnique({ where: { id: payload.sub }, select: {
+        id: true, email: true, globalRole: true, isBanned: true, twoFactorEnabled: true, tokenVersion: true,
+      } });
+      if (!user || user.isBanned || user.twoFactorEnabled || (user.tokenVersion ?? 0) !== (payload.tokenVersion ?? 0)) {
+        throw new UnauthorizedException();
+      }
+      // Authorization always uses the current database role, never a stale JWT role.
+      request['user'] = { ...payload, sub: user.id, email: user.email, role: user.globalRole };
     } catch {
       throw new UnauthorizedException('Invalid or expired authentication token');
     }

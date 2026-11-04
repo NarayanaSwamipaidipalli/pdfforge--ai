@@ -11,22 +11,22 @@ export const Footer = () => {
           <div className="col-span-2">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xs">
-                PF
+                D
               </div>
               <span className="font-semibold text-zinc-900 dark:text-white tracking-tight">
-                PDFForge AI
+                Doxera
               </span>
             </div>
             <p className="text-xs text-zinc-500 max-w-sm mb-4 leading-relaxed">
               Enterprise document intelligence & high-throughput cloud PDF processing engine.
-              Trusted by Fortune 500 legal teams, finance departments, and engineering leaders worldwide.
+              Tools for teams working with documents, tables, and images.
             </p>
             <div className="flex items-center gap-3 text-xs text-zinc-500">
               <span className="flex items-center gap-1">
-                <ShieldCheck className="w-4 h-4 text-emerald-500" /> SOC2 Type II Certified
+                <ShieldCheck className="w-4 h-4 text-emerald-500" /> Account access controls
               </span>
               <span className="flex items-center gap-1">
-                <FileLock2 className="w-4 h-4 text-blue-500" /> GDPR & HIPAA Compliant
+                <FileLock2 className="w-4 h-4 text-blue-500" /> Authenticated document access
               </span>
             </div>
           </div>
@@ -75,7 +75,7 @@ export const Footer = () => {
         </div>
 
         <div className="pt-8 border-t border-zinc-100 dark:border-zinc-900 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-400">
-          <p>© 2026 PDFForge AI Technologies Inc. All rights reserved. Zero-permanent file retention policy.</p>
+          <p>© 2026 Doxera All rights reserved. Zero-permanent file retention policy.</p>
           <div className="flex items-center gap-6">
             <Link href="/about" className="hover:text-zinc-600 dark:hover:text-zinc-300">About</Link>
             <Link href="/contact" className="hover:text-zinc-600 dark:hover:text-zinc-300">Contact</Link>

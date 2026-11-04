@@ -30,6 +30,7 @@ describe('AuthService', () => {
       },
       userSession: {
         create: jest.fn().mockResolvedValue({ id: 'sess_1' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
 

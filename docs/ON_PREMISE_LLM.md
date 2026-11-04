@@ -1,11 +1,11 @@
-# PDFForge AI – On-Premise & Private LLM Deployment Guide
+# Doxera – On-Premise & Private LLM Deployment Guide
 ## Air-Gapped Zero-Cloud Confidential Document Intelligence
 
 ---
 
 ### 1. Architectural Overview & Trust Boundaries
 
-For defense, healthcare (HIPAA), financial auditing, and high-security legal workloads, PDFForge AI features a **Zero-Cloud-Egress Mode** powered by an on-premise **Ollama / vLLM Sidecar Architecture**.
+For defense, healthcare (HIPAA), financial auditing, and high-security legal workloads, Doxera features a **Zero-Cloud-Egress Mode** powered by an on-premise **Ollama / vLLM Sidecar Architecture**.
 
 When this mode is engaged, no document text, vector embeddings, or prompt tokens are transmitted outside your VPC or on-premise datacenter boundary.
 

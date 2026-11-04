@@ -1,3 +1,3 @@
 """
-PDFForge AI Document Intelligence and RAG Pipeline
+Doxera Document Intelligence and RAG Pipeline
 """

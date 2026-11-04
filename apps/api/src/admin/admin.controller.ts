@@ -3,7 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser, Roles } from '../common/decorators/roles.decorator';
 
 @ApiTags('Admin & Observability')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -30,23 +30,24 @@ export class AdminController {
   }
 
   @Patch('users/:id/role')
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Update global role for a specific user (USER, SUPPORT, ADMIN, SUPERADMIN)' })
-  async updateUserRole(@Param('id') userId: string, @Body() body: { role: string }) {
-    return this.adminService.updateUserRole(userId, body.role);
+  async updateUserRole(@Param('id') userId: string, @Body() body: { role: string }, @CurrentUser('sub') actorId: string) {
+    return this.adminService.updateUserRole(userId, body.role, actorId);
   }
 
   @Post('users/:id/ban')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Suspend user account and revoke access' })
-  async banUser(@Param('id') userId: string, @Body() body: { reason?: string }) {
-    return this.adminService.banUser(userId, body?.reason || 'Terms violation');
+  async banUser(@Param('id') userId: string, @Body() body: { reason?: string }, @CurrentUser('sub') actorId: string) {
+    return this.adminService.banUser(userId, body?.reason || 'Terms violation', actorId);
   }
 
   @Post('users/:id/unban')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Unban suspended user account' })
-  async unbanUser(@Param('id') userId: string) {
-    return this.adminService.unbanUser(userId);
+  async unbanUser(@Param('id') userId: string, @CurrentUser('sub') actorId: string) {
+    return this.adminService.unbanUser(userId, actorId);
   }
 
   @Get('jobs')

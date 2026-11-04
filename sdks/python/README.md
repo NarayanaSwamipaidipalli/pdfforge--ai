@@ -1,6 +1,6 @@
 # pdfforge
 
-Official Python SDK for the **PDFForge AI – Enterprise PDF Intelligence Platform**.
+Official Python SDK for the **Doxera – Enterprise PDF Intelligence Platform**.
 
 Supports both synchronous and asynchronous workflows with full Pydantic v2 type safety.
 
@@ -17,7 +17,7 @@ from pdfforge import PDFForgeClient
 
 client = PDFForgeClient(
     api_key="your_api_key_here",
-    base_url="https://api.pdfforge.ai/api/v1"
+    base_url="https://api.doxera.in/api/v1"
 )
 
 # 1. Process files in a single line

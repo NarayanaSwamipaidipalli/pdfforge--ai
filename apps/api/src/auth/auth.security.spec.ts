@@ -46,7 +46,9 @@ describe('Authentication security boundaries', () => {
       FRONTEND_URL: 'http://127.0.0.1:49872', JWT_SECRET: 'a'.repeat(64), JWT_REFRESH_SECRET: 'b'.repeat(64) });
     prisma = { user: { findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }) }, organization: { create: jest.fn() },
-      subscription: { findMany: jest.fn().mockResolvedValue([]) } };
+      subscription: { findMany: jest.fn().mockResolvedValue([]) },
+      userSession: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      oAuthState: { create: jest.fn().mockResolvedValue({}), updateMany: jest.fn().mockResolvedValue({ count: 1 }) } };
     service = new AuthService(prisma, jwt, config);
     // Mock only the external certificate retrieval boundary. Google's real RSA verification executes.
     certs = jest.spyOn(OAuth2Client.prototype, 'getFederatedSignonCertsAsync').mockResolvedValue({
@@ -126,7 +128,7 @@ describe('Authentication security boundaries', () => {
   });
 
   it('consumes password reset credentials once under concurrent attempts', async () => {
-    const raw = 'r'.repeat(64);
+    const raw = crypto.randomBytes(32).toString('hex');
     let stored: string | null = crypto.createHash('sha256').update(raw).digest('hex');
     prisma.user.findFirst.mockResolvedValue({ id: 'user-fixture' });
     prisma.user.updateMany.mockImplementation(async ({ where, data }) => {
@@ -175,6 +177,20 @@ describe('Authentication security boundaries', () => {
     await expect(service.validateGoogleOAuthState('fixture', cookie)).rejects.toThrow(UnauthorizedException);
   });
 
+  it('allows only one concurrent consumption of a valid OAuth state', async () => {
+    const redirect = 'http://127.0.0.1:49872/auth/callback';
+    const flow = await service.beginGoogleOAuth(redirect);
+    const state = new URL(flow.url).searchParams.get('state');
+    let consumed = false;
+    prisma.oAuthState.updateMany.mockImplementation(async () => {
+      if (consumed) return { count: 0 };
+      consumed = true; return { count: 1 };
+    });
+    const attempts = await Promise.allSettled([0, 1].map(() => service.validateGoogleOAuthState(state, flow.cookie, redirect)));
+    expect(attempts.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter(result => result.status === 'rejected')).toHaveLength(1);
+  });
+
   it.each([{ purpose: 'access' }, { sub: undefined }, { jti: undefined }])('rejects refresh-purpose confusion or malformed identity', async (changes) => {
     await expect(service.refreshTokens(refreshToken(changes))).rejects.toThrow(UnauthorizedException);
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
@@ -212,6 +228,6 @@ describe('Authentication security boundaries', () => {
     await service.logoutByToken(stale);
     expect(prisma.user.updateMany).not.toHaveBeenCalled();
     await service.logoutByToken(current);
-    expect(prisma.user.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { refreshTokenHash: null } }));
+    expect(prisma.user.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { refreshTokenHash: null, tokenVersion: { increment: 1 } } }));
   });
 });

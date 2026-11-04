@@ -15,6 +15,7 @@ export function tokenVerificationOptions(config: ConfigService, purpose: 'access
 
 export function validTokenClaims(payload: any, purpose: 'access' | 'refresh'): boolean {
   return !!payload && payload.purpose === purpose && typeof payload.sub === 'string' && payload.sub.length > 0
-    && typeof payload.exp === 'number'
+    && typeof payload.exp === 'number' && Number.isFinite(payload.exp)
+    && (payload.tokenVersion === undefined || (Number.isSafeInteger(payload.tokenVersion) && payload.tokenVersion >= 0))
     && (purpose !== 'refresh' || (typeof payload.jti === 'string' && payload.jti.length > 0));
 }

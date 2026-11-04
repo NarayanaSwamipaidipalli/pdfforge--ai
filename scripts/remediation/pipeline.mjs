@@ -4,10 +4,12 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { command, readRun, root, testEnv } from './isolated.mjs';
+import { defaultMinioImage } from '../docker/prepare-env.mjs';
 
 const run = readRun();
 const suffix = randomBytes(4).toString('hex');
-const prefix = `${run.project}-pipeline-${suffix}`;
+// DNS labels must stay below 64 characters (botocore validates S3 endpoints).
+const prefix = `pdfforge-${suffix}-pipeline`;
 const database = `security_pipeline_${suffix}`;
 const names = Object.fromEntries(['redis', 'minio', 'api', 'worker', 'celery', 'migrate', 'bootstrap', 'runner', 'validate']
   .map(kind => [kind, `${prefix}-${kind}`]));
@@ -66,7 +68,7 @@ try {
   const images = { api: ownedImage(apiImage), worker: ownedImage(workerImage),
     // Resolve local images to immutable IDs. No registry pull or existing container inspection occurs.
     redis: command('docker', ['image', 'inspect', '--format', '{{.Id}}', process.env.PDFFORGE_PIPELINE_REDIS_IMAGE || 'redis:7.4-alpine']),
-    minio: command('docker', ['image', 'inspect', '--format', '{{.Id}}', process.env.PDFFORGE_PIPELINE_MINIO_IMAGE || 'cgr.dev/chainguard/minio:latest']),
+    minio: command('docker', ['image', 'inspect', '--format', '{{.Id}}', process.env.PDFFORGE_PIPELINE_MINIO_IMAGE || defaultMinioImage]),
   };
   mkdirSync(evidence, { recursive: true });
   writeFileSync(resolve(evidence, 'resources.json'), JSON.stringify({ project: run.project, database, names,

@@ -135,7 +135,7 @@ export default function FeaturesPage() {
               Enterprise Benchmark
             </span>
             <h2 className="text-2xl font-semibold text-zinc-900 tracking-tight mt-2">
-              How PDFForge AI compares to legacy platforms
+              How Doxera compares to legacy platforms
             </h2>
           </div>
 
@@ -144,7 +144,7 @@ export default function FeaturesPage() {
               <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-500 font-medium">
                 <tr>
                   <th className="py-3 px-4 min-w-[220px]">Capability</th>
-                  <th className="py-3 px-4 font-bold text-blue-600 bg-blue-50/50">PDFForge AI</th>
+                  <th className="py-3 px-4 font-bold text-blue-600 bg-blue-50/50">Doxera</th>
                   <th className="py-3 px-4">Adobe Acrobat Web</th>
                   <th className="py-3 px-4">iLovePDF</th>
                   <th className="py-3 px-4">Smallpdf</th>
