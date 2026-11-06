@@ -429,30 +429,10 @@ export class AuthService implements OnModuleInit {
     throw new ServiceUnavailableException('GitHub authentication is disabled until verified OAuth is configured');
   }
 
-  async forgotPassword(email: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
-
-    if (!user) {
-      return { success: true, message: 'If that email address is registered, password reset instructions have been sent.' };
-    }
-
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetExpires = new Date(Date.now() + 3600000); // 1 hour
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordResetToken: crypto.createHash('sha256').update(resetToken).digest('hex'),
-        passwordResetExpiresAt: resetExpires,
-      },
-    });
-
-    return {
-      success: true,
-      message: 'If that email address is registered, password reset instructions have been sent.',
-    };
+  async forgotPassword(_email: string): Promise<never> {
+    // Fail closed: there is no verified email delivery, so a reset token could never
+    // reach the account owner. Do not look up accounts or mint reset credentials.
+    throw new ServiceUnavailableException('Password recovery is disabled until verified email delivery is configured');
   }
 
   async resetPassword(token: string, newPassword: string) {

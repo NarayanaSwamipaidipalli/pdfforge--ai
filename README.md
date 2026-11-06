@@ -104,7 +104,21 @@ Access the services:
 
 ---
 
-### 2. Manual Development Mode
+### 2. Run Without Docker or VS Code (one command)
+With Node.js 20+, Python 3.12+, PostgreSQL 16 and Redis installed natively, run from any terminal:
+
+```bash
+./scripts/run-local.sh        # installs deps on first run, migrates the DB, starts everything
+./scripts/run-local.sh stop   # stops all services it started
+```
+
+It creates the `pdfforge` database user, generates local dev secrets in `.local/dev.env`, and starts
+S3 storage (a `minio` binary if on PATH, otherwise a `moto` S3 mock), the Python worker, Celery, the
+NestJS API and the Next.js web app. Logs go to `.local/logs/`.
+
+---
+
+### 3. Manual Development Mode
 
 #### Backend API Gateway (NestJS)
 ```bash

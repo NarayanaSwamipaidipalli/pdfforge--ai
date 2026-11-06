@@ -62,3 +62,6 @@ Thumbs.db
 migration-backups/
 *.tsbuildinfo
 .pytest_cache/
+
+# Local no-Docker runtime (scripts/run-local.sh)
+.local/
