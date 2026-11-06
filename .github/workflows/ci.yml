@@ -27,6 +27,10 @@ jobs:
 
       - name: Validate Prisma Schema
         working-directory: ./apps/api
+        # `prisma validate` resolves env("DATABASE_URL") but never connects;
+        # a syntactically valid placeholder is enough for schema validation.
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
         run: npx prisma validate
 
       - name: Run Jest Unit Tests
@@ -44,6 +48,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Install System Dependencies (match worker Dockerfile)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-writer libreoffice-calc libreoffice-impress \
+            tesseract-ocr tesseract-ocr-eng fonts-dejavu-core fonts-liberation fontconfig
 
       - name: Install Python Dependencies
         working-directory: ./services/pdf-worker
