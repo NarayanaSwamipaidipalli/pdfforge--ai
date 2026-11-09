@@ -93,6 +93,42 @@ describe('Authentication security boundaries', () => {
     await expect(service.exchangeGoogleCode('unused')).rejects.toThrow(UnauthorizedException);
   });
 
+  describe('authorization code exchange', () => {
+    const axios = require('axios').default;
+    const redirect = 'http://127.0.0.1:49872/auth/callback';
+    afterEach(() => jest.restoreAllMocks());
+
+    it('rejects a pasted client_secret JSON document without contacting Google', async () => {
+      const post = jest.spyOn(axios, 'post');
+      service = new AuthService(prisma, jwt, fixtureConfig({ GOOGLE_CLIENT_ID: clientId,
+        GOOGLE_CLIENT_SECRET: '{"web":{"client_secret":"private-fixture-secret"}}', FRONTEND_URL: 'http://127.0.0.1:49872',
+        GOOGLE_CALLBACK_URL: 'http://127.0.0.1:49871/api/v1/auth/google/callback', JWT_SECRET: 'a'.repeat(64) }));
+      const errors = jest.spyOn((service as any).logger, 'error').mockImplementation(() => {});
+      await expect(service.exchangeGoogleCode('code-fixture', redirect, 'nonce')).rejects.toThrow(ServiceUnavailableException);
+      expect(post).not.toHaveBeenCalled();
+      expect(JSON.stringify(errors.mock.calls)).not.toMatch(/private-fixture/);
+    });
+
+    it('logs only the Google OAuth error code when the exchange is rejected', async () => {
+      jest.spyOn(axios, 'post').mockRejectedValue({ response: { status: 401, data: { error: 'invalid_client', error_description: 'private-detail' } } });
+      const warn = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => {});
+      await expect(service.exchangeGoogleCode('private-code', redirect, 'nonce')).rejects.toThrow('Failed to exchange Google authorization code');
+      expect(warn).toHaveBeenCalledWith('Google code exchange rejected: invalid_client');
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(/private-|fixture-only/);
+    });
+
+    it('sends the state-bound redirect URI and verifies the returned ID token nonce', async () => {
+      const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: { id_token: googleToken({ nonce: 'expected' }) } });
+      await expect(service.exchangeGoogleCode('code-fixture', redirect, 'expected')).resolves.toHaveProperty('googleId', 'google-fixture');
+      const [url, body] = post.mock.calls[0] as [string, string];
+      expect(url).toBe('https://oauth2.googleapis.com/token');
+      expect(new URLSearchParams(body).get('redirect_uri')).toBe(redirect);
+      expect(new URLSearchParams(body).get('grant_type')).toBe('authorization_code');
+      jest.spyOn(axios, 'post').mockResolvedValue({ data: { id_token: googleToken({ nonce: 'other' }) } });
+      await expect(service.exchangeGoogleCode('code-fixture', redirect, 'expected')).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
   it.each(['ya29.fixture', 'not-a-jwt', 'Bearer credential', ''])('rejects malformed credentials: %s', async (token) => {
     await expect(service.verifyGoogleToken(token)).rejects.toThrow(BadRequestException);
     expect(certs).not.toHaveBeenCalled();

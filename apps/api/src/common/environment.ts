@@ -19,6 +19,9 @@ export function validateEnvironment(env: Record<string, any>) {
   if (new Set([env.JWT_SECRET, env.JWT_REFRESH_SECRET, env.WORKER_CALLBACK_SECRET]).size !== 3) {
     throw new Error('Authentication and worker secrets must be different');
   }
+  if (env.ENABLE_RAZORPAY === 'true' && /^rzp_live_/.test(String(env.RAZORPAY_KEY_ID || '')) && env.ALLOW_RAZORPAY_LIVE !== 'true') {
+    throw new Error('Live Razorpay keys require ALLOW_RAZORPAY_LIVE=true; use rzp_test_ keys outside approved production');
+  }
   if (env.NODE_ENV === 'production') {
     let database: URL;
     try { database = new URL(required(env, 'DATABASE_URL')); } catch { throw new Error('DATABASE_URL must be a valid PostgreSQL URL'); }

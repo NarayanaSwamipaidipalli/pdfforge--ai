@@ -268,6 +268,11 @@ export class AuthService implements OnModuleInit {
     if (!clientId || !clientSecret) {
       throw new BadRequestException('Google OAuth credentials (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) are not configured');
     }
+    // A pasted client_secret_*.json document (or stray whitespace) is never a valid secret.
+    if (/[\s{}"]/.test(clientSecret) || /\s/.test(clientId)) {
+      this.logger.error('Google OAuth misconfigured: GOOGLE_CLIENT_SECRET must be the client secret value, not the downloaded JSON file');
+      throw new ServiceUnavailableException('Google authentication is not configured correctly');
+    }
 
     const defaultCallback = this.configService.get<string>(
       'GOOGLE_CALLBACK_URL',
@@ -275,6 +280,7 @@ export class AuthService implements OnModuleInit {
     );
     const targetRedirectUri = this.googleRedirectUri(redirectUri || defaultCallback);
 
+    let idToken: unknown;
     try {
       const tokenRes = await axios.post(
         'https://oauth2.googleapis.com/token',
@@ -290,14 +296,18 @@ export class AuthService implements OnModuleInit {
           timeout: 8000,
         },
       );
-
-      if (!tokenRes.data?.id_token) throw new UnauthorizedException('Google identity token missing');
-      return await this.verifyGoogleToken(tokenRes.data.id_token, expectedNonce);
-    } catch {
+      idToken = tokenRes.data?.id_token;
+    } catch (error) {
+      // Log only Google's OAuth error code (e.g. invalid_grant); never the request, code or secret.
+      const reason = (error as any)?.response?.data?.error;
+      this.logger.warn(`Google code exchange rejected: ${typeof reason === 'string' && /^[a-z_]{1,40}$/.test(reason) ? reason : 'network_or_unknown'}`);
       throw new UnauthorizedException('Failed to exchange Google authorization code');
     }
-
-    throw new UnauthorizedException('Failed to retrieve Google user profile');
+    if (typeof idToken !== 'string' || !idToken) {
+      this.logger.warn('Google code exchange rejected: id_token_missing');
+      throw new UnauthorizedException('Failed to exchange Google authorization code');
+    }
+    return this.verifyGoogleToken(idToken, expectedNonce);
   }
 
   async googleAuth(

@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 
@@ -34,7 +35,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getResponse()
         : null;
 
-    const message = status >= 500 ? 'Internal server error occurred' :
+    // Deliberate 503s carry authored, user-actionable text (e.g. provider not configured).
+    const masked = status >= 500 && !(exception instanceof ServiceUnavailableException);
+    const message = masked ? 'Internal server error occurred' :
       typeof exceptionResponse === 'object' && exceptionResponse !== null && 'message' in exceptionResponse
         ? (exceptionResponse as any).message
         : exception instanceof Error

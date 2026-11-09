@@ -12,6 +12,13 @@ describe('production environment and CORS', () => {
   it.each(['JWT_SECRET', 'JWT_REFRESH_SECRET', 'WORKER_CALLBACK_SECRET', 'DATABASE_URL', 'REDIS_URL', 'S3_BUCKET_NAME'])('requires %s', name => {
     const env = good(); delete env[name]; expect(() => validateEnvironment(env)).toThrow();
   });
+  it('refuses live Razorpay keys unless live payments are explicitly allowed', () => {
+    const razorpay = { ENABLE_RAZORPAY: 'true', RAZORPAY_KEY_ID: 'rzp_live_fixture' };
+    expect(() => validateEnvironment({ ...good(), ...razorpay })).toThrow(/ALLOW_RAZORPAY_LIVE/);
+    expect(validateEnvironment({ ...good(), ...razorpay, ALLOW_RAZORPAY_LIVE: 'true' })).toBeDefined();
+    expect(validateEnvironment({ ...good(), ENABLE_RAZORPAY: 'true', RAZORPAY_KEY_ID: 'rzp_test_fixture' })).toBeDefined();
+    expect(validateEnvironment({ ...good(), ENABLE_RAZORPAY: 'false', RAZORPAY_KEY_ID: 'rzp_live_fixture' })).toBeDefined();
+  });
   it('rejects reused keys and enabled token bypass configuration', () => {
     expect(() => validateEnvironment({ ...good(), JWT_REFRESH_SECRET: good().JWT_SECRET })).toThrow();
     expect(() => validateEnvironment({ ...good(), ALLOW_TEST_TOKENS: 'true' })).toThrow();
