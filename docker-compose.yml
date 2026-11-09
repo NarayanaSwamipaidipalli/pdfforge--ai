@@ -91,6 +91,17 @@ services:
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:4000/api/v1/auth/google/callback}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       CORS_ORIGINS: ${CORS_ORIGINS:-${FRONTEND_URL:-http://localhost:3000}}
+      # Disabled unless test-mode (rzp_test_*) keys are supplied in the private env file.
+      ENABLE_RAZORPAY: ${ENABLE_RAZORPAY:-false}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      RAZORPAY_PRICE_PRO_MONTHLY: ${RAZORPAY_PRICE_PRO_MONTHLY:-}
+      RAZORPAY_PRICE_PRO_YEARLY: ${RAZORPAY_PRICE_PRO_YEARLY:-}
+      RAZORPAY_PRICE_BUSINESS_MONTHLY: ${RAZORPAY_PRICE_BUSINESS_MONTHLY:-}
+      RAZORPAY_PRICE_BUSINESS_YEARLY: ${RAZORPAY_PRICE_BUSINESS_YEARLY:-}
+      RAZORPAY_PRICE_ENTERPRISE_MONTHLY: ${RAZORPAY_PRICE_ENTERPRISE_MONTHLY:-}
+      RAZORPAY_PRICE_ENTERPRISE_YEARLY: ${RAZORPAY_PRICE_ENTERPRISE_YEARLY:-}
     ports:
       - "127.0.0.1:4000:4000"
     depends_on:
@@ -188,11 +199,18 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-false}
     container_name: pdfforge-web
     restart: always
     environment:
       API_GATEWAY_INTERNAL_URL: http://api-gateway:4000
       NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # Same-origin storage proxy. Only active while S3_PUBLIC_HOST is set
+      # (temporary public sharing); empty locally, where browsers reach MinIO directly.
+      S3_INTERNAL_ENDPOINT: http://minio:9000
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-pdfforge-documents}
+      S3_PUBLIC_HOST: ${S3_PUBLIC_HOST:-}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
