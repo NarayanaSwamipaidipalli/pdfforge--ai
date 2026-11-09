@@ -41,7 +41,7 @@ No checkout verification, settlement, signature validation, capture or subscript
 | API tests | 181 passed, 17 suites |
 | NestJS production build | Passed |
 | Isolated worker tests | 37 passed |
-| Pricing/Billing browser suite | 28 passed, 1 failed in the last recorded run (see "Pricing/Billing hydration error" below) |
+| Pricing/Billing browser suite | 28 passed, 1 failed in the earlier run (see "Pricing/Billing hydration error" below); **29 passed, 0 failed** in the final production run (see the end of this document) |
 | Dashboard browser suite | 14 passed |
 | Real PDF workflow | 17 passed |
 | Remaining workspace browser suite | 43 passed against the production build |
@@ -108,7 +108,25 @@ Replacement copy states only behaviour confirmed in code: 24-hour file expiry wi
 | Secret scan of the working tree and `origin/main...HEAD` | No keys, tokens, private keys, tunnel hosts, payment IDs or personal emails |
 | Mocked hydration probe, fresh production build | 90/90 page loads clean across 15 routes, three viewport/motion configurations and both themes; malformed `/organizations` shows the error state |
 
-**Not yet run: the real-backend Pricing/Billing suite.** The API allows browser requests only from `http://localhost:3000`, and the Next proxy forwards the `Origin` header. That port was held by a development server from the previous session, which this session was not permitted to stop. The 28/1 result above therefore still stands as the latest real-backend Pricing/Billing run.
+## Final real-backend Pricing/Billing run (2026-11-09, 10:12–10:13 UTC)
+
+The API accepts browser requests only from `http://localhost:3000`. With your authorization, the previous session's development server was positively identified and stopped:
+- A PowerShell wrapper had launched `next dev -p 3000 -H 127.0.0.1` from `apps/web` (PIDs 14464 and 12156).
+
+The latest production build (identical to the committed source) was then served on port 3000. It used `API_GATEWAY_INTERNAL_URL=http://127.0.0.1:4000`, and the API's database was the local Docker `postgres:5432/pdfforge_db`. The suite ran with `UI_TEST_BASE_URL=http://localhost:3000 node scripts/ui-redesign-browser.cjs`.
+
+| Result | Detail |
+| --- | --- |
+| **29 passed, 0 failed** | Catalog and provider configuration, authentication boundaries, real sign-in, an empty real billing history, the admin restriction, Pricing and Billing at 1440/768/390px in both themes, mobile checkout focus trap, unavailable yearly checkout, injected checkout/history/catalog/cancellation failures, reduced motion and theme persistence |
+| Application errors | **0**. React error #418 did not occur. |
+| Console entries | 4 expected 503s from injected failure fixtures; 0 Google headless errors |
+| Payment safety | 1 checkout request stubbed in the browser; 0 verification requests; 0 real payment requests |
+| Database effect, checked read-only afterwards | Exactly one new user (`doxera-ui-1794219145008-9a7061@example.com`, FREE); 0 new payments, subscriptions or invoices |
+| Screenshots | 23, in `.remediation/ui-redesign/shots/`. The previous 28/1 report is kept as `browser-report.2026-11-09T0555Z-28pass-1fail.json`. |
+
+Afterwards the temporary production server was stopped. The development server was restarted with its original command and environment; its logs are in `.remediation/ui-redesign/dev-server.*.log`. `localhost:3000`, the API health endpoint and all six Docker services were confirmed healthy.
+
+The API container still runs its existing image, so `/billing/plans` serves the earlier catalog strings until that image is rebuilt. The suite checks prices and limits, which are unchanged.
 
 Running containers still use their existing images, so the worker's stamp text changes take effect only after the worker image is rebuilt.
 

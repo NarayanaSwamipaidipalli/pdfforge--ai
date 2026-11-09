@@ -1,5 +1,15 @@
 # Doxera — AI Handoff Document
 
+## Final verification — 2026-11-09
+
+The real-backend Pricing/Billing suite passed **29/29** against a fresh production build on
+`localhost:3000`, with 0 application errors (React #418 resolved) and 0 payment requests. It created
+one synthetic FREE account and no payments, subscriptions or invoices. Earlier the same day,
+unsupported claims were removed site-wide, the Organizations crash was fixed and lint was cleaned up.
+Remaining before launch: legal review of Terms, and rebuilding the API and worker images so the
+catalog and stamp text changes take effect. The dev server was restored on :3000. See
+`docs/ui-redesign-verification.md`.
+
 ## Continuation by Claude — 2026-11-09 (after Codex)
 
 Took over `ui-redesign` without redoing features. Re-ran tsc, web 62/62, API 181/181, Nest and
