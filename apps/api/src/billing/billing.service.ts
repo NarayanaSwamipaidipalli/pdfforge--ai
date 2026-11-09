@@ -76,7 +76,27 @@ export class BillingService {
         ...(razorpay ? ['razorpay'] : []),
         ...(paypal ? ['paypal'] : []),
       ],
+      ...(razorpay ? { razorpayPrices: this.razorpayPriceTable() } : {}),
     };
+  }
+
+  private razorpayPaise(tier: string, interval: string): number | null {
+    const price = this.configService.get<string>(`RAZORPAY_PRICE_${tier}_${interval.toUpperCase()}`);
+    if (!price || !/^\d+$/.test(price) || !Number.isSafeInteger(Number(price)) || Number(price) <= 0 || Number(price) > 2147483647) {
+      return null;
+    }
+    return Number(price);
+  }
+
+  private razorpayPriceTable(): Record<string, number> {
+    const table: Record<string, number> = {};
+    for (const tier of ['PRO', 'BUSINESS', 'ENTERPRISE']) {
+      for (const interval of ['monthly', 'yearly']) {
+        const paise = this.razorpayPaise(tier, interval);
+        if (paise !== null) table[`${tier}_${interval.toUpperCase()}`] = paise;
+      }
+    }
+    return table;
   }
 
   // ============================================================================
@@ -423,11 +443,11 @@ export class BillingService {
     let couponCode: string | undefined;
     if (provider === 'razorpay') {
       // Explicit paise prices; never convert USD using an approximate exchange rate.
-      const price = this.configService.get<string>(`RAZORPAY_PRICE_${tier}_${interval.toUpperCase()}`);
-      if (!price || !/^\d+$/.test(price) || !Number.isSafeInteger(Number(price)) || Number(price) <= 0 || Number(price) > 2147483647) {
+      const configuredPaise = this.razorpayPaise(tier, interval);
+      if (configuredPaise === null) {
         throw new ServiceUnavailableException('Razorpay INR price is not configured for this plan');
       }
-      amountMinor = Number(price);
+      amountMinor = configuredPaise;
       currency = 'INR';
       if (dto.couponCode) throw new BadRequestException('USD coupons cannot be applied to INR orders');
     } else {
@@ -792,10 +812,7 @@ export class BillingService {
   async generateInvoicePdf(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: {
-        subscriptions: true,
-        memberships: { include: { organization: true } },
-      },
+      select: { name: true, email: true },
     });
 
     if (!user) {
@@ -807,26 +824,32 @@ export class BillingService {
     });
     if (!invoice) throw new NotFoundException('No paid invoice is available');
 
-    const org = user.memberships[0]?.organization;
     const invoiceNum = invoice.invoiceNumber;
+    const date = new Date(invoice.createdAt);
+    if (!Number.isFinite(invoice.amount) || invoice.amount < 0 ||
+      !/^[A-Z]{3}$/.test(invoice.currency) || !Number.isFinite(date.getTime())) {
+      throw new ServiceUnavailableException('The recorded receipt information is incomplete');
+    }
+    // Invoice records do not contain historical plan, tax, payment method, or
+    // organization snapshots. Render only their recorded values and label the
+    // current account contact separately from historical billing information.
+    const receipt = {
+      invoiceNumber: invoiceNum,
+      invoiceDate: date.toISOString().slice(0, 10),
+      amount: invoice.amount,
+      currency: invoice.currency,
+      customerName: user.name || undefined,
+      customerEmail: user.email,
+    };
     const workerUrl = this.configService.get<string>('PDF_WORKER_URL', 'http://pdf-worker:8000');
     const workerSecret = this.configService.get<string>('WORKER_CALLBACK_SECRET');
-    const amount = invoice.amount;
 
     let pdfBuffer: Buffer;
     try {
       if (!this.configured(workerSecret)) throw new Error('Worker authentication unavailable');
       const res = await axios.post(
         `${workerUrl}/api/v1/invoices/generate`,
-        {
-          invoiceNumber: invoiceNum,
-          customerName: user.name || 'Valued Customer',
-          customerEmail: user.email,
-          organizationName: org?.name || 'Personal Workspace',
-          planTier: user.plan,
-          amount,
-          currency: invoice.currency,
-        },
+        receipt,
         {
           headers: { 'x-pdfforge-worker-secret': workerSecret },
           responseType: 'arraybuffer',
@@ -834,9 +857,12 @@ export class BillingService {
         },
       );
       pdfBuffer = Buffer.from(res.data);
+      if (res.headers?.['x-doxera-receipt-version'] !== '1' || pdfBuffer.subarray(0, 5).toString('ascii') !== '%PDF-') {
+        throw new Error('Receipt renderer did not return a PDF');
+      }
     } catch {
-      this.logger.warn(`PDF worker unavailable for invoice generation, using high-fidelity fallback generator`);
-      pdfBuffer = this.generateMinimalPdf(invoiceNum, user.name || 'Valued Customer', user.plan, amount, invoice.currency);
+      this.logger.warn('Receipt renderer unavailable; using the recorded-value PDF fallback');
+      pdfBuffer = this.generateMinimalPdf(receipt);
     }
 
     return {
@@ -845,58 +871,43 @@ export class BillingService {
     };
   }
 
-  private generateMinimalPdf(
-    invoiceNumber: string,
-    customerName: string,
-    planTier: string,
-    amount: number,
-    currency: string,
-  ): Buffer {
-    const cleanCustomer = customerName.replace(/[^\x20-\x7E]|[()\\]/g, '');
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const stream = `BT /F1 16 Tf 50 740 Td (Doxera - Official Tax Invoice) Tj ET
-BT /F1 12 Tf 50 700 Td (Invoice Reference: ${invoiceNumber}) Tj ET
-BT /F1 12 Tf 50 675 Td (Billed To: ${cleanCustomer}) Tj ET
-BT /F1 12 Tf 50 650 Td (Plan Tier: ${planTier}) Tj ET
-BT /F1 12 Tf 50 625 Td (Total Amount Paid: ${amount.toFixed(2)} ${currency}) Tj ET
-BT /F1 12 Tf 50 600 Td (Payment Status: COMPLETED / PAID) Tj ET
-BT /F1 12 Tf 50 575 Td (Issue Date: ${dateStr}) Tj ET
-BT /F1 10 Tf 50 530 Td (Payment receipt for the recorded transaction.) Tj ET
-BT /F1 10 Tf 50 510 Td (Thank you for subscribing to Doxera Enterprise SaaS Cloud.) Tj ET`;
-
-    const pdf = `%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
-endobj
-4 0 obj
-<< /Length ${stream.length} >>
-stream
-${stream}
-endstream
-endobj
-5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
-endobj
-xref
-0 6
-0000000000 65535 f 
-0000000010 00000 n 
-0000000060 00000 n 
-0000000117 00000 n 
-0000000247 00000 n 
-0000000300 00000 n 
-trailer
-<< /Size 6 /Root 1 0 R >>
-startxref
-368
-%%EOF`;
-
-    return Buffer.from(pdf, 'utf-8');
+  private generateMinimalPdf(receipt: {
+    invoiceNumber: string; invoiceDate: string; amount: number; currency: string;
+    customerName?: string; customerEmail: string;
+  }): Buffer {
+    // The built-in Helvetica fallback supports ASCII. Escape PDF delimiters and
+    // replace unsupported glyphs rather than letting record text become code.
+    const literal = (value: string) => value.replace(/[^\x20-\x7E]/g, '?').replace(/[()\\]/g, '\\$&');
+    const lines = [
+      'Doxera - Payment receipt',
+      `Receipt reference: ${receipt.invoiceNumber}`,
+      `Recorded date (UTC): ${receipt.invoiceDate}`,
+      `Recorded amount paid: ${receipt.currency} ${receipt.amount.toFixed(2)}`,
+      'Recorded status: PAID',
+      'Current account contact:',
+      ...(receipt.customerName ? [receipt.customerName] : []),
+      receipt.customerEmail,
+      'This receipt reflects the stored payment record.',
+    ];
+    const stream = lines.map((line, index) =>
+      `BT /F1 ${index === 0 ? 18 : 11} Tf 50 ${740 - index * 32} Td (${literal(line)}) Tj ET\n`).join('');
+    const objects = [
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+      `<< /Length ${Buffer.byteLength(stream, 'ascii')} >>\nstream\n${stream}endstream`,
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ];
+    let pdf = '%PDF-1.4\n';
+    const offsets: number[] = [];
+    objects.forEach((object, index) => {
+      offsets.push(Buffer.byteLength(pdf, 'ascii'));
+      pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    });
+    const xref = Buffer.byteLength(pdf, 'ascii');
+    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    pdf += offsets.map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('');
+    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    return Buffer.from(pdf, 'ascii');
   }
 }

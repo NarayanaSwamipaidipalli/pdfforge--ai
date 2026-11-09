@@ -82,16 +82,12 @@ async def dispatch_job(payload: ProcessJobRequest):
 
 
 class GenerateInvoiceRequest(BaseModel):
-    invoiceNumber: Optional[str] = None
-    invoiceDate: Optional[str] = None
-    dueDate: Optional[str] = None
-    customerName: Optional[str] = "Valued Customer"
-    customerEmail: Optional[str] = "billing@company.com"
-    organizationName: Optional[str] = "Enterprise Workspace"
-    planTier: Optional[str] = "PRO"
-    items: Optional[List[Dict[str, Any]]] = None
-    currency: Optional[str] = "USD"
-    checksum: Optional[str] = None
+    invoiceNumber: str = Field(min_length=1, max_length=200)
+    invoiceDate: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    amount: float = Field(ge=0, allow_inf_nan=False)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    customerName: Optional[str] = None
+    customerEmail: str
 
 
 @protected.post("/invoices/generate")
@@ -103,7 +99,7 @@ async def generate_invoice_endpoint(payload: GenerateInvoiceRequest):
     filename = re.sub(r"[^a-zA-Z0-9._-]", "_", payload.invoiceNumber or "invoice")[:100]
     return Response(
         content=pdf_bytes, media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"', "X-Doxera-Receipt-Version": "1"},
     )
 
 
