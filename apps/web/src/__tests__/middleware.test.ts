@@ -74,7 +74,7 @@ describe('middleware — public routes', () => {
 });
 
 describe('middleware — protected routes with no cookies', () => {
-  const protectedPaths = ['/dashboard', '/account', '/settings', '/admin'];
+  const protectedPaths = ['/dashboard', '/billing', '/account', '/settings', '/ai-studio', '/organizations', '/admin'];
 
   for (const path of protectedPaths) {
     it(`redirects ${path} to /login when no token cookie is present`, () => {

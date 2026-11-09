@@ -15,6 +15,9 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY . .
 RUN mkdir -p public
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* values are inlined into the client bundle at build time.
+ARG NEXT_PUBLIC_DEMO_MODE=false
+ENV NEXT_PUBLIC_DEMO_MODE=$NEXT_PUBLIC_DEMO_MODE
 RUN npm run build
 
 FROM node:22-alpine AS runner

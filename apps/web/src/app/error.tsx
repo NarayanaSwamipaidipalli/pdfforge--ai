@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, RefreshCw, Home, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 
 export default function ErrorBoundary({
   error,
@@ -16,46 +16,40 @@ export default function ErrorBoundary({
   }, [error]);
 
   return (
-    <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center bg-[#fbfbfd]">
-      <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mb-5 shadow-sm">
-        <AlertTriangle className="w-7 h-7" />
+    <div className="flex min-h-[70vh] flex-col items-center justify-center bg-zinc-50 p-6 text-center text-ink-900 dark:bg-ink-950 dark:text-white">
+      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-rose-500/20 bg-rose-500/10 text-rose-600 dark:text-rose-300">
+        <AlertTriangle className="h-7 w-7" aria-hidden />
       </div>
 
-      <h1 className="text-2xl font-bold text-zinc-900 tracking-tight mb-2">
-        Something unexpected occurred
-      </h1>
+      <h1 className="mb-2 text-2xl font-bold tracking-tight">Something went wrong</h1>
 
-      <p className="text-xs text-zinc-500 max-w-md mb-6 leading-relaxed">
-        Our automated telemetry has logged this incident. Your session and encrypted documents remain completely secure.
+      <p className="mb-6 max-w-md text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+        This page hit an unexpected error. Try again, and if it keeps happening, contact support with the reference below.
       </p>
 
       {error.digest && (
-        <div className="mb-6 px-3 py-1.5 rounded-lg bg-zinc-100 font-mono text-[11px] text-zinc-600 border border-zinc-200">
-          Trace ID: {error.digest}
+        <div className="mb-6 rounded-lg border border-black/10 bg-black/[0.03] px-3 py-1.5 font-mono text-[11px] text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
+          Reference: {error.digest}
         </div>
       )}
 
       <div className="flex items-center gap-3">
         <button
+          type="button"
           onClick={() => reset()}
-          className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5"
+          className="focus-ring flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-brand-500"
         >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Try Again</span>
+          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+          <span>Try again</span>
         </button>
 
         <Link
           href="/"
-          className="px-4 py-2 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5"
+          className="focus-ring flex items-center gap-1.5 rounded-xl border border-black/10 px-4 py-2 text-xs font-semibold transition-colors hover:bg-black/[0.04] dark:border-white/15 dark:hover:bg-white/[0.06]"
         >
-          <Home className="w-3.5 h-3.5" />
-          <span>Return Home</span>
+          <Home className="h-3.5 w-3.5" aria-hidden />
+          <span>Return home</span>
         </Link>
-      </div>
-
-      <div className="mt-8 text-[11px] text-zinc-400 flex items-center gap-1">
-        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-        <span>DoD 5220.22-M Zero Data Retention Guard Active</span>
       </div>
     </div>
   );

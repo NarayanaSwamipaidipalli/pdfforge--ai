@@ -15,6 +15,38 @@ describe('administrator privilege boundaries', () => {
     prisma.$transaction = jest.fn(async callback => callback(prisma));
     service = new AdminService(prisma);
   });
+  it('reports settled revenue per currency without fabricating or converting amounts', async () => {
+    prisma.subscription = { count: jest.fn().mockResolvedValue(5) };
+    prisma.processingJob = { count: jest.fn().mockResolvedValue(0), groupBy: jest.fn().mockResolvedValue([]) };
+    prisma.fileRecord = { count: jest.fn().mockResolvedValue(0) };
+    prisma.payment = { groupBy: jest.fn().mockResolvedValue([
+      { currency: 'INR', _sum: { amount: 99 } },
+      { currency: 'USD', _sum: { amount: 12 } },
+    ]) };
+
+    const { metrics } = await service.getSystemTelemetry();
+
+    // Five active subscriptions must not become a fabricated 5 * 24.5 = 122.5 USD figure.
+    expect(metrics.monthlyRecurringRevenueUsd).toBe(12);
+    expect(metrics.revenueByCurrency).toEqual({ INR: 99, USD: 12 });
+    // INR is never folded into the USD total at any exchange rate.
+    expect(metrics.monthlyRecurringRevenueUsd).not.toBeCloseTo(122.5);
+    const where = prisma.payment.groupBy.mock.calls[0][0].where;
+    expect(where.status).toBe('COMPLETED');
+    expect(where.createdAt.gte.getUTCDate()).toBe(1);
+  });
+
+  it('reports zero revenue when no payments have settled this period', async () => {
+    prisma.subscription = { count: jest.fn().mockResolvedValue(9) };
+    prisma.processingJob = { count: jest.fn().mockResolvedValue(0), groupBy: jest.fn().mockResolvedValue([]) };
+    prisma.fileRecord = { count: jest.fn().mockResolvedValue(0) };
+    prisma.payment = { groupBy: jest.fn().mockResolvedValue([]) };
+
+    const { metrics } = await service.getSystemTelemetry();
+    expect(metrics.monthlyRecurringRevenueUsd).toBe(0);
+    expect(metrics.revenueByCurrency).toEqual({});
+  });
+
   it('prevents an administrator from assigning super-administrator privileges', async () => {
     await expect(service.updateUserRole('user', 'SUPERADMIN', 'admin')).rejects.toThrow(ForbiddenException);
     expect(prisma.user.update).not.toHaveBeenCalled();

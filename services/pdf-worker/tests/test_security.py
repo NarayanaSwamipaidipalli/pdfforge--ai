@@ -118,7 +118,7 @@ class WorkerHttpSecurityTests(unittest.TestCase):
             self.assertNotIn(TEST_SECRET, response.text)
 
     def test_authenticated_invoice_returns_pdf_and_sanitizes_filename(self):
-        response = self.client.post("/api/v1/invoices/generate", json={"invoiceNumber": "fixture\r\nInjected: value"}, headers=AUTH)
+        response = self.client.post("/api/v1/invoices/generate", json={"invoiceNumber": "fixture\r\nInjected: value", "invoiceDate": "2026-01-02", "amount": 99, "currency": "INR", "customerEmail": "receipt@example.com"}, headers=AUTH)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b"%PDF-"))
         self.assertNotIn("\r", response.headers["content-disposition"])

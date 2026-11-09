@@ -3,15 +3,17 @@
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PDF_TOOLS, PdfTool } from '@/lib/tools-registry';
-import { useToast } from '@/components/ui/Toast';
+import { motion, useReducedMotion } from 'framer-motion';
+import { PDF_TOOLS } from '@/lib/tools-registry';
+import { Button } from '@/components/ui/Button';
+import { Card, SectionHeading, Badge } from '@/components/ui/Card';
+import { Reveal, Stagger, StaggerItem, HoverLift } from '@/components/ui/Motion';
+import { cn } from '@/lib/cn';
 import {
   Search,
   Sparkles,
   UploadCloud,
-  FileCheck2,
   ShieldCheck,
-  Zap,
   ArrowRight,
   Layers,
   Scissors,
@@ -19,598 +21,562 @@ import {
   FileText,
   Lock,
   BrainCircuit,
-  MessageSquareCode,
-  Receipt,
   ScanText,
-  CheckCircle2,
   ChevronDown,
-  Building2,
-  Globe2,
-  Sliders,
-  Star,
-  Quote,
-  Mail,
-  Send,
-  Eye,
-  Check,
+  Terminal,
+  Workflow,
+  Gauge,
+  FileStack,
 } from 'lucide-react';
+
+const CATEGORY_LABELS: Record<string, string> = {
+  all: 'All tools',
+  basic: 'Core',
+  convert: 'Convert',
+  advanced: 'Advanced & OCR',
+  ai: 'AI',
+};
+
+// Highlighted capabilities. Every entry maps to a tool that actually exists.
+const FEATURES = [
+  { icon: Minimize2, title: 'Compress', desc: 'Shrink large files while keeping text sharp and selectable.', slug: 'compress-pdf' },
+  { icon: Layers, title: 'Merge', desc: 'Combine many documents into one, in the order you choose.', slug: 'merge-pdf' },
+  { icon: Scissors, title: 'Split', desc: 'Break a document apart or pull out just the pages you need.', slug: 'split-pdf' },
+  { icon: FileText, title: 'Convert', desc: 'Move between PDF, Word, Excel, PowerPoint and images.', slug: 'pdf-to-word' },
+  { icon: ScanText, title: 'OCR', desc: 'Turn scans and photos into searchable, selectable text.', slug: 'ocr-pdf' },
+  { icon: Lock, title: 'Protect', desc: 'Add passwords, encrypt, redact or sign before sharing.', slug: 'protect-pdf' },
+  { icon: BrainCircuit, title: 'AI intelligence', desc: 'Summarise long documents and ask questions about them.', slug: 'ai-pdf-chat' },
+  { icon: FileStack, title: 'Batch processing', desc: 'Queue many documents and let the workers handle them.', slug: 'batch-processing' },
+];
+
+const STEPS = [
+  { icon: UploadCloud, title: 'Upload', desc: 'Drag a file in, or pick one from your device to start processing.' },
+  { icon: Workflow, title: 'Choose a tool', desc: `Pick from ${PDF_TOOLS.length} tools. Each one has only the controls it actually needs.` },
+  { icon: Gauge, title: 'Track progress', desc: 'Jobs run on a real worker queue. You see live status, never a fake bar.' },
+  { icon: ShieldCheck, title: 'Download', desc: 'Grab your result from a signed, expiring link. Then it ages out.' },
+];
+
+// Mirrors PLAN_LIMITS in apps/api/src/common/effective-plan.ts.
+const PLANS = [
+  { name: 'Free', price: '$0', cadence: 'forever', features: ['Files up to 25 MB', 'Batches of 3', '5 AI requests / month'], cta: 'Start free', highlight: false },
+  { name: 'Pro', price: '$12', cadence: '/ month', features: ['Files up to 250 MB', 'Batches of 50', '500 AI requests / month'], cta: 'Choose Pro', highlight: true },
+  { name: 'Business', price: '$49', cadence: '/ month', features: ['Files up to 500 MB', 'Batches of 200', '2,500 AI requests / month'], cta: 'Choose Business', highlight: false },
+];
+
+const FAQS = [
+  {
+    q: 'What happens to my documents after processing?',
+    a: 'Uploads use temporary signed storage links. Processing results are tied to your account, and downloading a result requires authentication. File availability depends on the service’s retention settings.',
+  },
+  {
+    q: 'What are the file size and batch limits?',
+    a: 'Free covers files up to 25 MB, batches of 3 and 5 AI requests a month. Pro raises that to 250 MB, batches of 50 and 500 AI requests. Business allows 500 MB, batches of 200 and 2,500 AI requests. Enterprise goes to 2 GB with batches of 1,000.',
+  },
+  {
+    q: 'Can I use Doxera from my own code?',
+    a: 'Yes. There is a REST API plus Node.js and Python SDKs, and a command line tool. You can create an API key from your account settings and call the same endpoints the web app uses.',
+  },
+  {
+    q: 'Which tools are available?',
+    a: `There are ${PDF_TOOLS.length} tools covering core editing, conversion between office formats and images, OCR, redaction, signing, encryption, comparison and repair, plus AI summarising and document chat.`,
+  },
+];
 
 export default function HomePage() {
   const router = useRouter();
-  const { addToast } = useToast();
+  const reduce = useReducedMotion();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isDragging, setIsDragging] = useState(false);
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
-
-  // Interactive Before/After Compression Demo State
-  const [compressionRatio, setCompressionRatio] = useState<number>(75);
-  const [newsletterEmail, setNewsletterEmail] = useState('');
-  const [newsletterSubscribed, setNewsletterSubscribed] = useState(false);
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   const filteredTools = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return PDF_TOOLS.filter((tool) => {
       const matchesSearch =
-        tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tool.description.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory =
-        selectedCategory === 'all' || tool.category === selectedCategory;
+        !q || tool.name.toLowerCase().includes(q) || tool.description.toLowerCase().includes(q);
+      const matchesCategory = selectedCategory === 'all' || tool.category === selectedCategory;
       return matchesSearch && matchesCategory;
     });
   }, [searchQuery, selectedCategory]);
 
+  const categories = useMemo(
+    () => [
+      { id: 'all', count: PDF_TOOLS.length },
+      { id: 'basic', count: PDF_TOOLS.filter((t) => t.category === 'basic').length },
+      { id: 'convert', count: PDF_TOOLS.filter((t) => t.category === 'convert').length },
+      { id: 'advanced', count: PDF_TOOLS.filter((t) => t.category === 'advanced').length },
+      { id: 'ai', count: PDF_TOOLS.filter((t) => t.category === 'ai').length },
+    ],
+    [],
+  );
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      router.push('/tools/compress-pdf');
-    }
+    if (e.dataTransfer.files?.length) router.push('/tools/compress-pdf');
   };
-
-  const handleNewsletterSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newsletterEmail || !newsletterEmail.includes('@')) {
-      addToast('Please enter a valid email address.', 'error');
-      return;
-    }
-    setNewsletterSubscribed(true);
-    addToast('Thank you for subscribing to Doxera updates!', 'success');
-  };
-
-  const categories = [
-    { id: 'all', label: 'All Tools', count: PDF_TOOLS.length },
-    { id: 'basic', label: 'Core Tools', count: PDF_TOOLS.filter((t) => t.category === 'basic').length },
-    { id: 'convert', label: 'Conversions', count: PDF_TOOLS.filter((t) => t.category === 'convert').length },
-    { id: 'advanced', label: 'Advanced & OCR', count: PDF_TOOLS.filter((t) => t.category === 'advanced').length },
-    { id: 'ai', label: 'AI Intelligence', count: PDF_TOOLS.filter((t) => t.category === 'ai').length },
-  ];
-
-  const testimonials = [
-    {
-      name: 'Elena Rostova',
-      role: 'General Counsel',
-      company: 'Apex Global Capital',
-      quote: 'Doxera replaced three fragmented PDF tools and shaved 8 hours a week off our contract review cycle. The zero-data-retention guarantee was mandatory for our compliance auditors.',
-      rating: 5,
-    },
-    {
-      name: 'Marcus Vance',
-      role: 'Head of Data Infrastructure',
-      company: 'Synthetix Bio',
-      quote: 'The Python SDK and Celery worker engine ingest over 40,000 clinical trial PDFs daily with sub-second latency. Truly enterprise grade architecture.',
-      rating: 5,
-    },
-    {
-      name: 'David Chen',
-      role: 'Principal Partner',
-      company: 'Chen & Partners LLP',
-      quote: 'The bounding box citations in the AI Studio give us confidence when reviewing hundred-page leases. It does not hallucinate numbers or dates.',
-      rating: 5,
-    },
-  ];
-
-  const faqs = [
-    {
-      q: 'How does Doxera guarantee document confidentiality and privacy?',
-      a: 'We enforce a Zero-Permanent-Storage policy. All uploaded and processed files are encrypted in-transit (TLS 1.3) and at-rest (AWS KMS AES-256). Files are held in ephemeral memory buffers and automatically purged via DoD 5220.22-M compliant shredding routines within 24 hours (or instantly upon user request).',
-    },
-    {
-      q: 'What AI models power the document intelligence and RAG chat?',
-      a: 'Our AI pipeline utilizes dense semantic embeddings (OpenAI text-embedding-3) paired with pgvector HNSW indexing, alongside OpenAI GPT-4o for document synthesis, table extraction, and zero-shot invoice parsing.',
-    },
-    {
-      q: 'Can I integrate Doxera into my own software or enterprise backend?',
-      a: 'Yes. Doxera provides high-performance REST and GraphQL APIs with SDKs in Node.js, Python, Kotlin, and Swift. API keys can be provisioned in seconds from the User Dashboard.',
-    },
-    {
-      q: 'What are the file size and batch limitations?',
-      a: 'Free tier users can process files up to 25 MB with 10 daily conversions. Pro accounts enjoy up to 250 MB per file with unlimited conversions and high-speed priority queues. Business & Enterprise plans support files up to 2 GB with custom dedicated worker clusters.',
-    },
-  ];
-
-  // Calculate dynamic simulation values based on slider
-  const simulatedOriginalMb = 16.4;
-  const simulatedCompressedMb = (simulatedOriginalMb * (1 - compressionRatio / 100)).toFixed(1);
-  const simulatedSavingsPercent = compressionRatio;
 
   return (
-    <div className="flex flex-col min-h-screen bg-white dark:bg-black text-zinc-900 dark:text-zinc-100">
-      {/* --- HERO SECTION --- */}
-      <section className="relative overflow-hidden pt-16 pb-20 md:pt-24 md:pb-28 border-b border-zinc-200/60 dark:border-zinc-800 bg-gradient-to-b from-white via-zinc-50/50 to-white dark:from-zinc-950 dark:via-black dark:to-zinc-950">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(45rem_50rem_at_top,theme(colors.blue.100),transparent)] dark:bg-[radial-gradient(45rem_50rem_at_top,theme(colors.blue.950),transparent)] opacity-60" />
-        
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 text-center">
-          {/* Release Badge */}
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-900 text-blue-700 dark:text-blue-300 text-xs font-medium mb-6 animate-pulse">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Doxera 2.0 Live – Powered by GPT-4o Document Intelligence</span>
-          </div>
+    <div className="flex flex-col">
+      {/* ================= HERO ================= */}
+      <section className="relative overflow-hidden pt-20 pb-24 md:pt-28 md:pb-32">
+        {/* Decorative background: grid + aurora. Hidden from assistive tech. */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+          <div className="absolute inset-0 bg-grid mask-fade opacity-70" />
+          <div className="absolute left-1/2 top-[-18%] h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-brand-500/20 blur-[130px] dark:bg-brand-500/25" />
+          <div className="absolute right-[6%] top-[22%] h-[340px] w-[340px] rounded-full bg-violet-500/15 blur-[110px]" />
+          <div className="absolute left-[6%] top-[38%] h-[280px] w-[280px] rounded-full bg-cyan-400/10 blur-[100px]" />
+        </div>
 
-          <h1 className="text-4xl sm:text-6xl font-semibold tracking-tight text-zinc-900 dark:text-white leading-[1.1] mb-6">
-            Enterprise PDF Intelligence & Cloud Processing
-          </h1>
-          <p className="text-lg sm:text-xl text-zinc-600 dark:text-zinc-400 max-w-2xl mx-auto mb-10 leading-relaxed font-normal">
-            Merge, compress, convert, OCR, and converse with documents at cloud scale.
-            Designed for millions of users with zero-data-retention security.
-          </p>
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-4xl text-center">
+            <Reveal>
+              <Badge className="mb-6">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                {PDF_TOOLS.length} tools, one workspace
+              </Badge>
+            </Reveal>
 
-          {/* Drag & Drop Hero Box */}
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setIsDragging(true);
-            }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={handleDrop}
-            className={`max-w-2xl mx-auto rounded-3xl border-2 border-dashed p-8 sm:p-10 transition-all duration-200 backdrop-blur-xl ${
-              isDragging
-                ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/40 scale-[1.02]'
-                : 'border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/80 hover:border-zinc-400 dark:hover:border-zinc-600 shadow-apple'
-            }`}
-          >
-            <div className="flex flex-col items-center justify-center text-center">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center mb-4 shadow-lg shadow-blue-500/25">
-                <UploadCloud className="w-8 h-8" />
-              </div>
-              <h3 className="text-lg font-semibold text-zinc-900 dark:text-white mb-1">
-                Drop your PDF or document here to start
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5">
-                Supports PDF, DOCX, XLSX, PPTX, JPG, PNG up to 250 MB
+            <Reveal delay={0.06}>
+              <h1 className="text-balance text-4xl font-bold leading-[1.08] tracking-tight text-ink-900 dark:text-white sm:text-5xl md:text-6xl lg:text-7xl">
+                Every document.
+                <br />
+                <span className={cn('text-gradient', !reduce && 'animate-gradient-pan')}>
+                  One powerful workspace.
+                </span>
+              </h1>
+            </Reveal>
+
+            <Reveal delay={0.12}>
+              <p className="mx-auto mt-6 max-w-xl text-pretty text-base leading-relaxed text-ink-600 dark:text-zinc-400 md:text-lg">
+                Compress, convert, sign and understand your PDFs in one place — with real
+                processing on a real queue, not a progress bar that lies to you.
               </p>
+            </Reveal>
 
-              <div className="flex flex-wrap justify-center gap-2">
-                <Link
-                  href="/tools/compress-pdf"
-                  className="px-4 py-2 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-1.5"
-                >
-                  <Minimize2 className="w-3.5 h-3.5" /> Compress PDF
-                </Link>
-                <Link
-                  href="/tools/merge-pdf"
-                  className="px-4 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-1.5"
-                >
-                  <Layers className="w-3.5 h-3.5" /> Merge PDFs
-                </Link>
-                <Link
-                  href="/ai-studio"
-                  className="px-4 py-2 rounded-full bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-1.5"
-                >
-                  <BrainCircuit className="w-3.5 h-3.5" /> AI Chat with PDF
-                </Link>
+            <Reveal delay={0.18}>
+              <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                <Button href="/register" size="lg" className="w-full sm:w-auto">
+                  Get started free
+                  <ArrowRight className="h-4 w-4" aria-hidden />
+                </Button>
+                <Button href="#tools" variant="secondary" size="lg" className="w-full sm:w-auto">
+                  Browse all tools
+                </Button>
               </div>
-            </div>
+              <p className="mt-4 text-xs text-ink-500 dark:text-zinc-500">
+                No credit card required. Free tier available.
+              </p>
+            </Reveal>
           </div>
 
-          {/* Quick Metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl mx-auto mt-14 pt-10 border-t border-zinc-200/80 dark:border-zinc-800 text-center">
-            <div>
-              <div className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">100M+</div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Documents Processed</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">&lt; 150ms</div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Processing Latency</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">99.99%</div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Cloud Uptime SLA</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">Zero</div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Permanent Retention</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* --- TRUSTED ORGANIZATIONS BANNER --- */}
-      <section className="py-10 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-6">
-            Trusted by security-conscious engineering and legal teams worldwide
-          </p>
-          <div className="flex flex-wrap justify-center items-center gap-8 md:gap-14 opacity-60 grayscale hover:grayscale-0 transition duration-300">
-            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">VERTEX CAPITAL</span>
-            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">DELOITTE GLOBAL</span>
-            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">NOVARTIS LEGAL</span>
-            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">STANFORD HEALTH</span>
-            <span className="font-bold text-base tracking-tight text-zinc-700 dark:text-zinc-300">KINETIC AEROSPACE</span>
-          </div>
-        </div>
-      </section>
-
-      {/* --- INTERACTIVE BEFORE / AFTER COMPRESSION PREVIEW --- */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-gradient-to-tr from-blue-900 via-indigo-900 to-zinc-950 rounded-3xl p-8 sm:p-12 text-white shadow-2xl relative overflow-hidden">
-          <div className="max-w-2xl mb-8">
-            <span className="text-xs uppercase font-bold text-blue-400 tracking-wider block mb-2">Live Compression Engine</span>
-            <h2 className="text-3xl font-semibold tracking-tight">
-              Lossless PyMuPDF Linearization in Action
-            </h2>
-            <p className="text-zinc-300 text-xs sm:text-sm mt-2 leading-relaxed">
-              Adjust the slider below to simulate real-time stream deflating, font subsetting, and high-DPI raster re-sampling.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
-            {/* Controls */}
-            <div className="space-y-6">
-              <div>
-                <div className="flex justify-between text-xs font-semibold mb-2">
-                  <span>Compression Level</span>
-                  <span className="text-blue-400">{compressionRatio}% Reduction</span>
+          {/* Interactive upload preview */}
+          <Reveal delay={0.26} y={24}>
+            <div className="mx-auto mt-14 max-w-3xl">
+              <Card
+                glass
+                gradientRing
+                className={cn(
+                  'relative overflow-hidden p-1 transition-shadow duration-300',
+                  isDragging && 'shadow-glow-lg',
+                )}
+              >
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  className={cn(
+                    'rounded-[1.1rem] border-2 border-dashed p-10 text-center transition-colors duration-200 md:p-14',
+                    isDragging
+                      ? 'border-brand-500 bg-brand-500/[0.07]'
+                      : 'border-black/10 dark:border-white/10',
+                  )}
+                >
+                  <motion.div
+                    animate={reduce || isDragging ? {} : { y: [0, -8, 0] }}
+                    transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+                    className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-600 dark:text-brand-300"
+                  >
+                    <UploadCloud className="h-8 w-8" aria-hidden />
+                  </motion.div>
+                  <p className="text-lg font-semibold text-ink-900 dark:text-white">
+                    {isDragging ? 'Drop to get started' : 'Drag a PDF here'}
+                  </p>
+                  <p className="mt-1.5 text-sm text-ink-500 dark:text-zinc-400">
+                    or{' '}
+                    <Link
+                      href="/tools/compress-pdf"
+                      className="font-medium text-brand-600 underline-offset-4 hover:underline dark:text-brand-300"
+                    >
+                      pick a tool
+                    </Link>{' '}
+                    to begin
+                  </p>
                 </div>
+              </Card>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ================= FEATURES ================= */}
+      <section className="border-t border-black/5 py-20 dark:border-white/5 md:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal>
+            <SectionHeading
+              eyebrow="Capabilities"
+              title="Everything you need for document work"
+              description="Each capability is a real tool in the product, running on the same processing engine."
+            />
+          </Reveal>
+
+          <Stagger className="mt-14 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {FEATURES.map(({ icon: Icon, title, desc, slug }) => (
+              <StaggerItem key={title}>
+                <HoverLift className="h-full">
+                  <Link href={`/tools/${slug}`} className="group block h-full focus-ring rounded-2xl">
+                    <Card className="h-full p-6 transition-colors duration-200 hover:border-brand-500/40">
+                      <div className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600 transition-transform duration-200 group-hover:scale-105 dark:text-brand-300">
+                        <Icon className="h-5 w-5" aria-hidden />
+                      </div>
+                      <h3 className="text-base font-semibold text-ink-900 dark:text-white">{title}</h3>
+                      <p className="mt-1.5 text-sm leading-relaxed text-ink-600 dark:text-zinc-400">{desc}</p>
+                    </Card>
+                  </Link>
+                </HoverLift>
+              </StaggerItem>
+            ))}
+          </Stagger>
+        </div>
+      </section>
+
+      {/* ================= HOW IT WORKS ================= */}
+      <section className="relative overflow-hidden border-t border-black/5 py-20 dark:border-white/5 md:py-28">
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[var(--background-subtle)]" />
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal>
+            <SectionHeading eyebrow="How it works" title="Four steps, no surprises" />
+          </Reveal>
+
+          <Stagger className="relative mt-14 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            {STEPS.map(({ icon: Icon, title, desc }, i) => (
+              <StaggerItem key={title}>
+                <div className="relative">
+                  <div className="mb-4 flex items-center gap-3">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-ink-900 text-sm font-bold text-white dark:bg-white dark:text-ink-900">
+                      {i + 1}
+                    </span>
+                    <Icon className="h-5 w-5 text-brand-600 dark:text-brand-300" aria-hidden />
+                  </div>
+                  <h3 className="text-base font-semibold text-ink-900 dark:text-white">{title}</h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-ink-600 dark:text-zinc-400">{desc}</p>
+                </div>
+              </StaggerItem>
+            ))}
+          </Stagger>
+        </div>
+      </section>
+
+      {/* ================= TOOLS CATALOG ================= */}
+      <section id="tools" className="scroll-mt-24 border-t border-black/5 py-20 dark:border-white/5 md:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal>
+            <SectionHeading
+              eyebrow="Full catalogue"
+              title={`All ${PDF_TOOLS.length} tools`}
+              description="Search or filter to find the one you need."
+            />
+          </Reveal>
+
+          <Reveal delay={0.08}>
+            <div className="mx-auto mt-10 max-w-xl">
+              <label htmlFor="tool-search" className="sr-only">
+                Search tools
+              </label>
+              <div className="relative">
+                <Search
+                  className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400 dark:text-zinc-500"
+                  aria-hidden
+                />
                 <input
-                  type="range"
-                  min="20"
-                  max="90"
-                  value={compressionRatio}
-                  onChange={(e) => setCompressionRatio(Number(e.target.value))}
-                  className="w-full accent-blue-500 cursor-pointer"
+                  id="tool-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search tools…"
+                  className="focus-ring h-12 w-full rounded-full border border-black/10 bg-white/70 pl-11 pr-4 text-sm text-ink-900 placeholder:text-ink-400 dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-zinc-500"
                 />
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10">
-                  <span className="text-[10px] uppercase text-zinc-400 block">Original Size</span>
-                  <span className="text-xl font-bold font-mono">{simulatedOriginalMb} MB</span>
-                </div>
-                <div className="p-4 rounded-2xl bg-emerald-500/20 backdrop-blur-md border border-emerald-400/30">
-                  <span className="text-[10px] uppercase text-emerald-300 block">Resulting Size</span>
-                  <span className="text-xl font-bold font-mono text-emerald-300">{simulatedCompressedMb} MB</span>
-                </div>
-              </div>
-
-              <Link
-                href="/tools/compress-pdf"
-                className="inline-flex items-center gap-2 py-2.5 px-5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-md transition"
-              >
-                <span>Compress Real PDF Now</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
             </div>
+          </Reveal>
 
-            {/* Visual Comparison Stage */}
-            <div className="lg:col-span-2 bg-black/40 rounded-2xl p-6 border border-white/10 backdrop-blur-md">
-              <div className="flex items-center justify-between pb-4 border-b border-white/10 text-xs">
-                <span className="font-mono text-zinc-400">Quarterly_Financial_Report_Q4.pdf</span>
-                <span className="text-emerald-400 font-bold">-{simulatedSavingsPercent}% Data Shrink</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 pt-6 text-center text-xs">
-                <div className="p-6 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center">
-                  <FileText className="w-12 h-12 text-zinc-400 mb-2" />
-                  <span className="font-semibold">Unoptimized Raw Input</span>
-                  <span className="text-[11px] text-zinc-400 mt-1">Full font tables, uncompressed 300DPI TIFFs</span>
-                </div>
-                <div className="p-6 rounded-xl bg-blue-600/20 border border-blue-400/40 flex flex-col items-center">
-                  <FileCheck2 className="w-12 h-12 text-blue-400 mb-2" />
-                  <span className="font-semibold text-blue-300">Optimized PDF/A-2b</span>
-                  <span className="text-[11px] text-blue-200 mt-1">Linearized fast web view, vector subset</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* --- TOOLS CATALOG SECTION --- */}
-      <section id="tools" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
-          <div>
-            <h2 className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight mb-2">
-              Every PDF tool you need, unified in one cloud suite
-            </h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-xl">
-              From instantaneous lossless compression to multi-lingual OCR and AI semantic search.
-            </p>
-          </div>
-
-          {/* Search Box */}
-          <div className="relative w-full md:w-80">
-            <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search 30+ PDF tools..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 text-sm rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm text-zinc-900 dark:text-zinc-100"
-            />
-          </div>
-        </div>
-
-        {/* Category Filter Tabs */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-8 no-scrollbar">
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={`px-4 py-2 text-xs font-medium rounded-full whitespace-nowrap transition-all duration-150 flex items-center gap-1.5 ${
-                selectedCategory === cat.id
-                  ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-sm'
-                  : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/80 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
-              }`}
-            >
-              <span>{cat.label}</span>
-              <span
-                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                  selectedCategory === cat.id
-                    ? 'bg-zinc-700 dark:bg-zinc-200 text-white dark:text-zinc-900'
-                    : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
-                }`}
-              >
-                {cat.count}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* Tools Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          {filteredTools.map((tool) => (
-            <Link
-              key={tool.id}
-              href={tool.category === 'ai' ? '/ai-studio' : `/tools/${tool.slug}`}
-              className="group p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-apple-hover transition-all duration-200 flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <div
-                    className={`w-11 h-11 rounded-xl bg-gradient-to-tr ${tool.accentColor} text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200`}
-                  >
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  {tool.badge && (
-                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
-                      {tool.badge}
-                    </span>
+          <Reveal delay={0.12}>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
+              {categories.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setSelectedCategory(c.id)}
+                  aria-pressed={selectedCategory === c.id}
+                  className={cn(
+                    'focus-ring rounded-full border px-4 py-2 text-xs font-semibold transition-colors duration-200',
+                    selectedCategory === c.id
+                      ? 'border-transparent bg-ink-900 text-white dark:bg-white dark:text-ink-900'
+                      : 'border-black/10 text-ink-600 hover:bg-black/[0.04] dark:border-white/10 dark:text-zinc-400 dark:hover:bg-white/[0.06]',
                   )}
-                </div>
+                >
+                  {CATEGORY_LABELS[c.id]}
+                  <span className="ml-1.5 opacity-60">{c.count}</span>
+                </button>
+              ))}
+            </div>
+          </Reveal>
 
-                <h3 className="font-semibold text-zinc-900 dark:text-white text-base mb-1.5 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                  {tool.name}
-                </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed mb-4">
-                  {tool.description}
+          {filteredTools.length === 0 ? (
+            <Reveal>
+              <div className="mt-14 text-center">
+                <p className="text-sm text-ink-500 dark:text-zinc-400">
+                  No tools match “{searchQuery}”.
                 </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSelectedCategory('all');
+                  }}
+                >
+                  Clear filters
+                </Button>
               </div>
-
-              <div className="flex items-center text-xs font-medium text-blue-600 dark:text-blue-400 pt-2 border-t border-zinc-100 dark:border-zinc-800 group-hover:translate-x-0.5 transition-transform">
-                <span>Launch Tool</span>
-                <ArrowRight className="w-3.5 h-3.5 ml-1" />
-              </div>
-            </Link>
-          ))}
+            </Reveal>
+          ) : (
+            <Stagger
+              gap={0.03}
+              className="mt-12 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            >
+              {filteredTools.map((tool) => (
+                <StaggerItem key={tool.slug}>
+                  <Link
+                    href={`/tools/${tool.slug}`}
+                    className="focus-ring group flex h-full items-start gap-3 rounded-xl border border-black/[0.07] bg-white/60 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-500/40 hover:shadow-card dark:border-white/[0.07] dark:bg-white/[0.03] dark:hover:shadow-card-dark"
+                  >
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+                      <FileText className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-ink-900 dark:text-white">
+                        {tool.name}
+                      </span>
+                      <span className="mt-0.5 line-clamp-2 block text-xs leading-relaxed text-ink-500 dark:text-zinc-400">
+                        {tool.description}
+                      </span>
+                    </span>
+                  </Link>
+                </StaggerItem>
+              ))}
+            </Stagger>
+          )}
         </div>
       </section>
 
-      {/* --- AI DOCUMENT INTELLIGENCE SHOWCASE --- */}
-      <section className="py-20 bg-zinc-900 text-white overflow-hidden relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            <div>
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-950/80 border border-violet-700/60 text-violet-300 text-xs font-medium mb-4">
-                <BrainCircuit className="w-3.5 h-3.5 text-violet-400" />
-                <span>Next-Gen RAG Architecture</span>
+      {/* ================= DEVELOPERS ================= */}
+      <section className="border-t border-black/5 py-20 dark:border-white/5 md:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="grid items-center gap-12 lg:grid-cols-2">
+            <Reveal>
+              <SectionHeading
+                align="left"
+                eyebrow="For developers"
+                title="The same engine, from your own code"
+                description="Everything the web app does is available over the REST API, with official Node.js and Python SDKs and a command line tool."
+              />
+              <div className="mt-7 flex flex-wrap gap-3">
+                <Button href="/developers" variant="secondary">
+                  <Terminal className="h-4 w-4" aria-hidden />
+                  Read the docs
+                </Button>
+                <Button href="/register" variant="ghost">
+                  Get an API key
+                  <ArrowRight className="h-4 w-4" aria-hidden />
+                </Button>
               </div>
-              <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight leading-tight mb-4">
-                Converse with documents. Extract facts with verifiable citations.
-              </h2>
-              <p className="text-zinc-400 text-sm leading-relaxed mb-8">
-                Doxera turns static PDFs into active knowledge graphs. Ask multi-page legal or financial questions and receive accurate answers with instant page-level bounding box citations.
-              </p>
+            </Reveal>
 
-              <div className="space-y-3.5">
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
-                  <span className="text-sm text-zinc-300">
-                    <strong>Invoice & Receipt Extraction</strong>: Parses totals, line items, and tax numbers into structured ERP JSON.
-                  </span>
+            <Reveal delay={0.1} y={24}>
+              <Card gradientRing className="overflow-hidden">
+                <div className="flex items-center gap-2 border-b border-black/5 px-4 py-3 dark:border-white/5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-rose-400/70" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-amber-400/70" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
+                  <span className="ml-2 text-xs text-ink-500 dark:text-zinc-500">compress.py</span>
                 </div>
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
-                  <span className="text-sm text-zinc-300">
-                    <strong>Contract Risk Radar</strong>: Automatically scans indemnity caps, termination clauses, and non-compete risks.
-                  </span>
-                </div>
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
-                  <span className="text-sm text-zinc-300">
-                    <strong>50+ Language Neural Translation</strong>: Preserves exact PDF typography, tables, and column alignments.
-                  </span>
-                </div>
-              </div>
+                <pre className="overflow-x-auto p-5 text-[13px] leading-relaxed">
+                  <code className="font-mono text-ink-700 dark:text-zinc-300">
+                    <span className="text-violet-500 dark:text-violet-400">from</span> doxera{' '}
+                    <span className="text-violet-500 dark:text-violet-400">import</span> Client
+                    {'\n\n'}
+                    client = Client(api_key=<span className="text-emerald-600 dark:text-emerald-400">&quot;...&quot;</span>)
+                    {'\n'}
+                    job = client.compress(
+                    {'\n'}
+                    {'  '}<span className="text-emerald-600 dark:text-emerald-400">&quot;report.pdf&quot;</span>,
+                    {'\n'}
+                    {'  '}level=<span className="text-emerald-600 dark:text-emerald-400">&quot;high&quot;</span>,
+                    {'\n'}
+                    )
+                    {'\n'}
+                    job.wait().download(<span className="text-emerald-600 dark:text-emerald-400">&quot;out.pdf&quot;</span>)
+                  </code>
+                </pre>
+              </Card>
+            </Reveal>
+          </div>
+        </div>
+      </section>
 
-              <div className="mt-8">
-                <Link
-                  href="/ai-studio"
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white text-zinc-950 hover:bg-zinc-100 font-medium text-sm transition-all shadow-lg"
+      {/* ================= PRICING PREVIEW ================= */}
+      <section className="relative border-t border-black/5 py-20 dark:border-white/5 md:py-28">
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[var(--background-subtle)]" />
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal>
+            <SectionHeading
+              eyebrow="Pricing"
+              title="Start free, upgrade when you need more"
+              description="Limits below reflect what the platform actually enforces."
+            />
+          </Reveal>
+
+          <Stagger className="mx-auto mt-14 grid max-w-5xl grid-cols-1 gap-5 md:grid-cols-3">
+            {PLANS.map((plan) => (
+              <StaggerItem key={plan.name}>
+                <Card
+                  gradientRing={plan.highlight}
+                  className={cn('relative flex h-full flex-col p-7', plan.highlight && 'shadow-glow')}
                 >
-                  <Sparkles className="w-4 h-4 text-violet-600" />
-                  Try AI Document Studio
-                </Link>
-              </div>
-            </div>
-
-            {/* Interactive Preview Card */}
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 shadow-2xl">
-              <div className="flex items-center justify-between pb-4 border-b border-zinc-800 mb-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-rose-500/80" />
-                  <div className="w-3 h-3 rounded-full bg-amber-500/80" />
-                  <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
-                  <span className="text-xs text-zinc-400 ml-2 font-mono">
-                    Commercial_Lease_Agreement_2026.pdf
-                  </span>
-                </div>
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">
-                  Live RAG Demo
-                </span>
-              </div>
-
-              <div className="space-y-4 text-xs font-sans">
-                {/* User Message */}
-                <div className="flex justify-end">
-                  <div className="bg-blue-600 text-white px-3.5 py-2 rounded-2xl rounded-tr-none max-w-sm">
-                    What are the tenant maintenance obligations under Section 7?
+                  {plan.highlight && (
+                    <Badge className="absolute -top-3 left-1/2 -translate-x-1/2">Most popular</Badge>
+                  )}
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-ink-500 dark:text-zinc-400">
+                    {plan.name}
+                  </h3>
+                  <div className="mt-3 flex items-baseline gap-1.5">
+                    <span className="text-4xl font-bold tracking-tight text-ink-900 dark:text-white">
+                      {plan.price}
+                    </span>
+                    <span className="text-sm text-ink-500 dark:text-zinc-400">{plan.cadence}</span>
                   </div>
-                </div>
+                  <ul className="mt-6 flex-1 space-y-3">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex items-start gap-2.5 text-sm text-ink-600 dark:text-zinc-300">
+                        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-600 dark:text-brand-300" aria-hidden />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <Button
+                    href="/pricing"
+                    variant={plan.highlight ? 'primary' : 'secondary'}
+                    className="mt-7 w-full"
+                  >
+                    {plan.cta}
+                  </Button>
+                </Card>
+              </StaggerItem>
+            ))}
+          </Stagger>
 
-                {/* AI Response */}
-                <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-lg bg-violet-600 text-white flex items-center justify-center shrink-0">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div className="bg-zinc-800/80 text-zinc-200 p-3.5 rounded-2xl rounded-tl-none space-y-2 border border-zinc-700/50">
-                    <p>
-                      Under <strong>Section 7.2 (Page 4)</strong>, the Tenant is strictly responsible for routine HVAC filter replacements and interior non-structural repairs up to $2,500 per incident.
-                    </p>
-                    <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-violet-300 font-mono text-[10px]">
-                      <span>Page 4 · Paragraph 2 · 98.4% Confidence</span>
+          <Reveal delay={0.1}>
+            <p className="mt-8 text-center text-sm text-ink-500 dark:text-zinc-400">
+              Need more?{' '}
+              <Link href="/pricing" className="font-medium text-brand-600 underline-offset-4 hover:underline dark:text-brand-300">
+                See Enterprise
+              </Link>
+            </p>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ================= FAQ ================= */}
+      <section className="border-t border-black/5 py-20 dark:border-white/5 md:py-28">
+        <div className="mx-auto max-w-3xl px-4 sm:px-6">
+          <Reveal>
+            <SectionHeading eyebrow="FAQ" title="Questions, answered" />
+          </Reveal>
+
+          <div className="mt-12 divide-y divide-black/[0.07] dark:divide-white/[0.07]">
+            {FAQS.map((faq, i) => {
+              const open = openFaq === i;
+              return (
+                <Reveal key={faq.q} delay={i * 0.04}>
+                  <div>
+                    <h3>
+                      <button
+                        type="button"
+                        onClick={() => setOpenFaq(open ? null : i)}
+                        aria-expanded={open}
+                        aria-controls={`faq-panel-${i}`}
+                        className="focus-ring flex w-full items-center justify-between gap-4 rounded-lg py-5 text-left"
+                      >
+                        <span className="text-base font-semibold text-ink-900 dark:text-white">{faq.q}</span>
+                        <ChevronDown
+                          className={cn(
+                            'h-5 w-5 shrink-0 text-ink-400 transition-transform duration-200 dark:text-zinc-500',
+                            open && 'rotate-180',
+                          )}
+                          aria-hidden
+                        />
+                      </button>
+                    </h3>
+                    <div
+                      id={`faq-panel-${i}`}
+                      hidden={!open}
+                      className="pb-5 text-sm leading-relaxed text-ink-600 dark:text-zinc-400"
+                    >
+                      {faq.a}
                     </div>
                   </div>
-                </div>
-              </div>
-            </div>
+                </Reveal>
+              );
+            })}
           </div>
         </div>
       </section>
 
-      {/* --- CUSTOMER TESTIMONIALS --- */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
-          <span className="text-xs uppercase font-bold text-blue-600 dark:text-blue-400 tracking-wider block mb-2">Verified Feedback</span>
-          <h2 className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight">
-            Loved by legal, finance, and engineering leaders
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {testimonials.map((t, idx) => (
-            <div
-              key={idx}
-              className="bg-zinc-50 dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 flex flex-col justify-between"
+      {/* ================= FINAL CTA ================= */}
+      <section className="border-t border-black/5 py-20 dark:border-white/5 md:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal y={24}>
+            <Card
+              gradientRing
+              className="relative overflow-hidden px-6 py-16 text-center md:px-16 md:py-20"
             >
-              <div>
-                <div className="flex items-center gap-1 text-amber-400 mb-4">
-                  {[...Array(t.rating)].map((_, i) => (
-                    <Star key={i} className="w-4 h-4 fill-amber-400" />
-                  ))}
-                </div>
-                <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 italic leading-relaxed mb-6">
-                  &ldquo;{t.quote}&rdquo;
-                </p>
+              <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+                <div className="absolute left-1/2 top-1/2 h-[420px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-500/15 blur-[120px]" />
               </div>
-
-              <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
-                <div className="font-semibold text-xs text-zinc-900 dark:text-white">{t.name}</div>
-                <div className="text-[11px] text-zinc-500 dark:text-zinc-400">{t.role} · {t.company}</div>
+              <h2 className="text-balance text-3xl font-bold tracking-tight text-ink-900 dark:text-white md:text-5xl">
+                Ready when you are
+              </h2>
+              <p className="mx-auto mt-4 max-w-lg text-pretty text-base text-ink-600 dark:text-zinc-400 md:text-lg">
+                Create an account and process your first document in under a minute.
+              </p>
+              <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                <Button href="/register" size="lg" className="w-full sm:w-auto">
+                  Get started free
+                  <ArrowRight className="h-4 w-4" aria-hidden />
+                </Button>
+                <Button href="/pricing" variant="secondary" size="lg" className="w-full sm:w-auto">
+                  Compare plans
+                </Button>
               </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* --- FAQ SECTION --- */}
-      <section className="py-20 max-w-4xl mx-auto px-4 sm:px-6">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight mb-3">
-            Frequently Asked Questions
-          </h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Everything you need to know about security, processing speed, and enterprise limits.
-          </p>
-        </div>
-
-        <div className="space-y-3">
-          {faqs.map((faq, idx) => (
-            <div
-              key={idx}
-              className="border border-zinc-200/80 dark:border-zinc-800 rounded-2xl overflow-hidden bg-white dark:bg-zinc-900 shadow-sm"
-            >
-              <button
-                onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
-                className="w-full text-left px-6 py-4 flex items-center justify-between font-medium text-sm text-zinc-900 dark:text-white hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-              >
-                <span>{faq.q}</span>
-                <ChevronDown
-                  className={`w-4 h-4 text-zinc-400 transition-transform duration-200 ${
-                    openFaq === idx ? 'rotate-180 text-blue-600' : ''
-                  }`}
-                />
-              </button>
-              {openFaq === idx && (
-                <div className="px-6 pb-5 pt-1 text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed border-t border-zinc-100 dark:border-zinc-800">
-                  {faq.a}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* --- NEWSLETTER & FINAL CALL TO ACTION --- */}
-      <section className="py-20 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center space-y-6">
-          <div className="w-12 h-12 mx-auto rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md">
-            <Mail className="w-6 h-6" />
-          </div>
-
-          <h2 className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight">
-            Stay Ahead in Document Intelligence
-          </h2>
-          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 max-w-xl mx-auto leading-relaxed">
-            Subscribe to our weekly engineering dispatch on PyMuPDF optimizations, pgvector chunking, and air-gapped document security.
-          </p>
-
-          <form onSubmit={handleNewsletterSubmit} className="max-w-md mx-auto flex gap-2">
-            <input
-              type="email"
-              value={newsletterEmail}
-              onChange={(e) => setNewsletterEmail(e.target.value)}
-              placeholder="Enter work email"
-              disabled={newsletterSubscribed}
-              className="flex-1 px-4 py-2.5 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
-            <button
-              type="submit"
-              disabled={newsletterSubscribed}
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition flex items-center gap-1.5"
-            >
-              {newsletterSubscribed ? (
-                <>
-                  <Check className="w-3.5 h-3.5" /> Subscribed
-                </>
-              ) : (
-                <>
-                  <span>Subscribe</span>
-                  <Send className="w-3 h-3" />
-                </>
-              )}
-            </button>
-          </form>
+            </Card>
+          </Reveal>
         </div>
       </section>
     </div>

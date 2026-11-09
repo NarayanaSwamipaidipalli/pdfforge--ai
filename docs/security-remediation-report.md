@@ -175,6 +175,50 @@ Lower-severity development advisories remain tracked. Hosted CI has not run beca
 does not push. A fresh staging restore, external provider verification and an approved rollout
 are required before claiming production readiness.
 
+### Local development stack restoration (2026-11-04, Claude)
+
+The dev stack had no private Compose env file. Existing Postgres and MinIO credentials were copied
+into the gitignored `.env.docker.local` from the running containers without being displayed or
+changed. The three application secrets were insecure placeholders that `validateEnvironment`
+rejects. They were replaced with random 64-character values, and the previous values are in
+gitignored `.env.docker.previous.local`. `ALLOW_TEST_TOKENS=true` was not carried forward. A
+`pg_dump` backup was taken before the two reviewed, additive migrations were applied, and all 50
+existing user rows were preserved. Verified on the real dev stack: all 7 services are up; health
+checks pass for web, API, proxy, worker, Celery, Redis and MinIO; register, login and token tampering
+behave correctly; presigned MinIO upload works; and `compress` and `pdf_to_word` jobs complete with
+valid PDF and DOCX outputs. API 166, web 41 and Docker helper 5 tests pass.
+
+### Provider integration checks (2026-11-04, Claude)
+
+Neither Google OAuth nor Razorpay is configured on the local stack, so no live provider flow was
+run. Fresh isolated reruns of the auth harness (8 scenarios) and the billing harness (12 scenarios)
+passed against the current code; these use real PostgreSQL and HTTP and simulate only the provider
+boundary. On the dev stack, every unconfigured path fails closed. Three fixes:
+
+- Deliberate 503 messages are no longer masked; all other 5xx responses still are.
+- Checkout on the pricing and billing pages is disabled unless an enabled provider is selected.
+- `ALLOW_RAZORPAY_LIVE` is now enforced: startup rejects `rzp_live_` keys without it.
+
+Compose passes the Razorpay settings to the API, disabled by default.
+
+Manual steps to finish live verification:
+
+1. **Google Cloud Console:** create an OAuth 2.0 Web client.
+   - JavaScript origin: `http://localhost:3000`
+   - Redirect URIs: `http://localhost:4000/api/v1/auth/google/callback` and `http://localhost:3000/auth/callback`
+   - Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to `.env.docker.local`.
+   - Recreate the API with `docker compose --env-file .env.docker.local up -d api-gateway`.
+     The login page reads the client ID from `/auth/google/url`.
+2. **Razorpay dashboard (Test Mode):** generate `rzp_test_` keys.
+   - Add to `.env.docker.local`: `ENABLE_RAZORPAY=true`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, a new random
+     `RAZORPAY_WEBHOOK_SECRET`, and INR paise prices (for example `RAZORPAY_PRICE_PRO_MONTHLY=99000`).
+   - Recreate the API with `docker compose --env-file .env.docker.local up -d api-gateway`.
+   - Pay with test card 4111 1111 1111 1111 to check verification and activation. Use a failing test card to check failure handling.
+3. **Webhook delivery:** Razorpay cannot reach `localhost`. Expose port 4000 through a tunnel (for example `ngrok http 4000`)
+   and register `https://<tunnel>/api/v1/billing/webhook/razorpay` with the same webhook secret and the
+   `payment.captured`, `order.paid` and `subscription.*` events.
+4. **Production:** set `ALLOW_RAZORPAY_LIVE=true` on the Render API service only when approved live keys are installed.
+
 ### Hosted CI on `staging` (2026-11-04, Claude)
 
 - Run #58 (`3e8ac90`): web `npm audit --audit-level=high` failed. `tinypool <=2.1.1` (via

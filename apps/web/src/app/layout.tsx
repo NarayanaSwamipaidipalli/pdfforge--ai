@@ -1,8 +1,17 @@
 import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
 import './globals.css';
+
+// Supplies --font-sans, which tailwind.config.ts puts at the head of the sans stack.
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-sans',
+});
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { ToastProvider } from '@/components/ui/Toast';
+import { THEME_INIT_SCRIPT } from '@/lib/theme';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://doxera.in'),
@@ -11,7 +20,7 @@ export const metadata: Metadata = {
     template: '%s | Doxera',
   },
   description:
-    'Scalable enterprise cloud and air-gapped PDF processing platform with 24+ tools, OCR, RAG document chat, invoice extraction, and DoD-grade compliance.',
+    'Convert, compress, edit and organize PDFs. Explore OCR, document questions, summaries and invoice extraction in one workspace.',
   keywords: [
     'PDF tools',
     'Merge PDF',
@@ -38,7 +47,7 @@ export const metadata: Metadata = {
     siteName: 'Doxera',
     title: 'Doxera – Enterprise PDF Intelligence & Conversion Platform',
     description:
-      'Enterprise-grade PDF ecosystem with AI RAG document chat, OCR, compression, digital signatures, and 100% private on-premise LLM inference.',
+      'PDF conversion, compression, editing, OCR and document analysis in one workspace.',
     images: [
       {
         url: '/opengraph-image',
@@ -52,7 +61,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Doxera – Enterprise PDF Intelligence',
     description:
-      'Enterprise-grade PDF processing with 24+ tools, OCR, and private AI Document Intelligence.',
+      'PDF processing, OCR and AI document analysis in one workspace.',
   },
   robots: {
     index: true,
@@ -84,18 +93,20 @@ export default function RootLayout({
       priceCurrency: 'USD',
     },
     description:
-      'Enterprise cloud & on-premise PDF processing platform with AI document chat, automated conversion, compression, and enterprise compliance.',
+      'PDF processing with document questions, conversion, compression and editing tools.',
   };
 
   return (
-    <html lang="en" className="scroll-smooth">
+    <html lang="en" suppressHydrationWarning className={`scroll-smooth ${inter.variable}`}>
       <head>
+        {/* Applies the stored theme before first paint to avoid a flash. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
-      <body className="min-h-screen flex flex-col bg-[#fbfbfd] text-[#1d1d1f] selection:bg-blue-600 selection:text-white">
+      <body className="min-h-screen flex flex-col font-sans bg-[var(--background)] text-[var(--foreground)] selection:bg-brand-600 selection:text-white">
         <ToastProvider>
           <Navbar />
           <main className="flex-1">{children}</main>

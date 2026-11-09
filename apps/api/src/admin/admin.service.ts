@@ -27,6 +27,20 @@ export class AdminService {
       where: { status: 'FAILED' },
     });
 
+    // Real settled revenue for the current calendar month, kept per currency.
+    // Mixed-currency totals are never summed and no exchange rate is applied.
+    const now = new Date();
+    const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const revenueRows = await this.prisma.payment.groupBy({
+      by: ['currency'],
+      where: { status: 'COMPLETED', createdAt: { gte: periodStart } },
+      _sum: { amount: true },
+    });
+    const revenueByCurrency: Record<string, number> = {};
+    for (const row of revenueRows) {
+      revenueByCurrency[row.currency] = +Number(row._sum.amount ?? 0).toFixed(2);
+    }
+
     return {
       metrics: {
         totalUsers,
@@ -43,7 +57,9 @@ export class AdminService {
           used: 14.8,
           percentage: 29.6,
         },
-        monthlyRecurringRevenueUsd: activeSubscriptions * 24.5,
+        monthlyRecurringRevenueUsd: revenueByCurrency.USD ?? 0,
+        revenueByCurrency,
+        revenuePeriodStart: periodStart.toISOString(),
       },
       topTools: jobsByTool.map((j) => ({ tool: j.tool, count: j._count.tool })),
       queueStatus: [

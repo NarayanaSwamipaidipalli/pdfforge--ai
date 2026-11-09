@@ -2,47 +2,149 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   Design tokens. Light is the default; .dark holds the premium midnight theme.
+   --------------------------------------------------------------------------- */
 :root {
-  --background: #fbfbfd;
-  --foreground: #1d1d1f;
-  --card-bg: rgba(255, 255, 255, 0.85);
-  --card-border: rgba(0, 0, 0, 0.08);
+  --background: #ffffff;
+  --background-subtle: #f7f8fc;
+  --foreground: #0b0d17;
+  --muted: #5b6178;
+  --card-bg: rgba(255, 255, 255, 0.78);
+  --card-border: rgba(11, 13, 23, 0.09);
+  --elevated: #ffffff;
+  --accent: #2449f5;
+  --accent-soft: rgba(36, 73, 245, 0.1);
+  --ring: rgba(36, 73, 245, 0.45);
+  --grid: linear-gradient(to right, rgba(0, 0, 0, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.045) 1px, transparent 1px);
 }
 
 .dark {
-  --background: #000000;
-  --foreground: #f5f5f7;
-  --card-bg: rgba(28, 28, 30, 0.8);
-  --card-border: rgba(255, 255, 255, 0.12);
+  --background: #07080f;
+  --background-subtle: #0b0d17;
+  --foreground: #eef1f8;
+  --muted: #959cb8;
+  --card-bg: rgba(22, 26, 44, 0.66);
+  --card-border: rgba(255, 255, 255, 0.09);
+  --elevated: #101322;
+  --accent: #598eff;
+  --accent-soft: rgba(89, 142, 255, 0.14);
+  --ring: rgba(89, 142, 255, 0.5);
+  --grid: linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Apple blur styling */
-.glass-panel {
-  background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--card-border);
+/* --------------------------------------------------------------------------
+   Reusable surface + effect primitives
+   -------------------------------------------------------------------------- */
+@layer components {
+  .glass-panel {
+    background: var(--card-bg);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--card-border);
+  }
+
+  .surface {
+    background: var(--elevated);
+    border: 1px solid var(--card-border);
+  }
+
+  /* Gradient hairline border that survives rounded corners. */
+  .ring-gradient {
+    position: relative;
+  }
+  .ring-gradient::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(89, 142, 255, 0.55), rgba(139, 92, 246, 0.35) 45%, rgba(34, 211, 238, 0.3));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .text-gradient {
+    background-image: linear-gradient(110deg, var(--foreground) 10%, #598eff 42%, #a78bfa 62%, var(--foreground) 92%);
+    background-size: 220% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .bg-grid {
+    background-image: var(--grid);
+    background-size: 48px 48px;
+  }
+
+  /* Radial fade so decorative grids never reach the section edges. */
+  .mask-fade {
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 55%, transparent 100%);
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 55%, transparent 100%);
+  }
+
+  .focus-ring {
+    outline: none;
+  }
+  .focus-ring:focus-visible {
+    box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+  }
+
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--accent-soft);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+    animation: shimmer 1.8s infinite;
+  }
 }
 
-/* Sleek custom scrollbar */
+/* Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(11, 13, 23, 0.18);
   border-radius: 9999px;
 }
 .dark ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* --------------------------------------------------------------------------
+   Accessibility: honour the OS reduced-motion preference everywhere.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  [data-motion-reveal] {
+    transform: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

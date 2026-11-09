@@ -91,6 +91,41 @@ describe('BillingService', () => {
     });
   });
 
+  describe('Razorpay INR pricing', () => {
+    const razorpayConfig = (prices: Record<string, string>) => (key: string, fallback?: any) => {
+      const values: Record<string, string> = {
+        ENABLE_RAZORPAY: 'true', RAZORPAY_KEY_ID: 'rzp_test_fixture', RAZORPAY_KEY_SECRET: 'fixture-secret',
+        RAZORPAY_WEBHOOK_SECRET: 'fixture-webhook', FRONTEND_URL: 'http://localhost:3000', ...prices,
+      };
+      return values[key] ?? fallback;
+    };
+
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'buyer@example.com', name: 'Buyer', isBanned: false });
+      prisma.billingOrder = { create: jest.fn().mockResolvedValue({ id: 'order_local_1' }), update: jest.fn() };
+    });
+
+    it('rejects a yearly Razorpay checkout when only the monthly INR price is configured', async () => {
+      config.get.mockImplementation(razorpayConfig({ RAZORPAY_PRICE_PRO_MONTHLY: '9900' }));
+      await expect(service.createCheckoutSession('user_1', { tier: 'PRO', interval: 'yearly', provider: 'razorpay' } as any))
+        .rejects.toThrow('Razorpay INR price is not configured for this plan');
+      expect(prisma.billingOrder.create).not.toHaveBeenCalled();
+    });
+
+    it('creates a Razorpay order for the configured monthly INR price and reports it to the client', async () => {
+      config.get.mockImplementation(razorpayConfig({ RAZORPAY_PRICE_PRO_MONTHLY: '9900' }));
+      const razorpay = jest.spyOn(service as any, 'razorpayRequest').mockResolvedValue({ id: 'order_rzp_fixture', amount: 9900, currency: 'INR' });
+      const result = await service.createCheckoutSession('user_1', { tier: 'PRO', interval: 'monthly', provider: 'razorpay' } as any);
+      expect(razorpay).toHaveBeenCalledWith('post', '/orders', expect.objectContaining({ amount: 9900, currency: 'INR' }));
+      expect(result).toMatchObject({ provider: 'razorpay', orderId: 'order_rzp_fixture', amount: 9900, currency: 'INR' });
+    });
+
+    it('publishes only configured INR prices alongside enabled providers', () => {
+      config.get.mockImplementation(razorpayConfig({ RAZORPAY_PRICE_PRO_MONTHLY: '9900', RAZORPAY_PRICE_BUSINESS_YEARLY: '0' }));
+      expect(service.getEnabledProviders()).toMatchObject({ razorpay: true, providers: ['razorpay'], razorpayPrices: { PRO_MONTHLY: 9900 } });
+    });
+  });
+
   describe('Coupon Calculations', () => {
     it('should apply percentage discount coupon correctly', async () => {
       prisma.coupon.findUnique.mockResolvedValue({

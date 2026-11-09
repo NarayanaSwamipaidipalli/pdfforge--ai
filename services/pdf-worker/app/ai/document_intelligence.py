@@ -369,7 +369,6 @@ def analyze_contract_data(input_path: str) -> Dict[str, Any]:
         "governingLaw": gov_law,
         "keyClauses": clauses,
         "complianceFlags": [
-            {"code": "CONFIDENTIALITY_VERIFIED", "status": "PASS", "description": "Processed under DoD 5220.22-M zero permanent retention standards."},
             {"code": "INTELLIGENCE_CONFIRMED", "status": "PASS", "description": "Actual vector text streams evaluated across all pages."}
         ]
     }

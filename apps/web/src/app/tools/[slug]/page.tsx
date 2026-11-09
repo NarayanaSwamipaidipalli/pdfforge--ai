@@ -74,8 +74,8 @@ export default function ToolPage({ params }: ToolPageProps) {
         a: `Yes, ${tool?.name} is completely available under the Starter Community tier with zero credit card required for standard file sizes up to 25 MB.`,
       },
       {
-        q: 'How does Doxera guarantee document confidentiality?',
-        a: 'We strictly enforce a Zero-Permanent-Retention architecture. Files are processed in ephemeral memory buffers and automatically expunged after completion under DoD 5220.22-M sanitation standards.',
+        q: 'How are uploads and results accessed?',
+        a: 'Uploads use temporary signed storage links. Processing results are tied to your account and require authentication to download. Availability depends on the service’s retention settings.',
       },
       {
         q: 'What is the maximum file size supported?',
@@ -86,11 +86,14 @@ export default function ToolPage({ params }: ToolPageProps) {
 
   // File state
   const [files, setFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState(0);
   const [isCompleted, setIsCompleted] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadFileName, setDownloadFileName] = useState<string>('processed_document.pdf');
+  // Real output size reported by the worker, when it reports one. Never estimated.
+  const [outputBytes, setOutputBytes] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Tool parameter states
@@ -188,6 +191,19 @@ export default function ToolPage({ params }: ToolPageProps) {
       setErrorMessage(null);
     }
     e.target.value = '';
+  };
+
+  const acceptFiles = (incoming: File[]) => {
+    if (incoming.length === 0) return;
+    setFiles(tool.multipleFiles ? [...files, ...incoming] : [incoming[0]]);
+    setIsCompleted(false);
+    setErrorMessage(null);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    acceptFiles(Array.from(e.dataTransfer.files || []));
   };
 
   const handleRemoveFile = (index: number) => {
@@ -379,6 +395,8 @@ export default function ToolPage({ params }: ToolPageProps) {
               const dlUrl = `${API_BASE}/pdf/jobs/${jobId}/download`;
               setDownloadUrl(dlUrl);
               setDownloadFileName(resultFileName);
+              const reported = Number(jobStatus.outputFileSizeBytes ?? jobStatus.outputSizeBytes);
+              setOutputBytes(Number.isFinite(reported) && reported > 0 ? reported : null);
               setIsProcessing(false);
               setIsCompleted(true);
             } else if (jobStatus.status === 'FAILED') {
@@ -463,20 +481,20 @@ export default function ToolPage({ params }: ToolPageProps) {
   };
 
   const steps = [
-    { title: 'Secure S3 Multipart Upload', desc: 'Direct encrypted multipart stream to MinIO/S3' },
+    { title: 'Upload document', desc: 'Transfer the document to storage using its signed upload link' },
     { title: 'ClamAV Security & Integrity Audit', desc: 'Cryptographic zero-exploit verification' },
     { title: 'Asynchronous PDF Processing', desc: `Executing ${tool.name} algorithm on Celery worker` },
     { title: 'Ready for Instant Streaming', desc: 'Protected by ephemeral 24h retention' },
   ];
 
   return (
-    <div className="min-h-screen bg-[#fbfbfd] py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen px-4 py-12 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         {/* Navigation Breadcrumb */}
         <div className="mb-6">
           <Link
             href="/#tools"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-500 dark:text-ink-400 dark:text-zinc-500 hover:text-ink-900 dark:text-white transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Back to Tools
           </Link>
@@ -492,7 +510,7 @@ export default function ToolPage({ params }: ToolPageProps) {
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-900 tracking-tight">
+                <h1 className="text-2xl sm:text-3xl font-semibold text-ink-900 dark:text-white tracking-tight">
                   {tool.name}
                 </h1>
                 {tool.badge && (
@@ -501,13 +519,13 @@ export default function ToolPage({ params }: ToolPageProps) {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-zinc-500">{tool.description}</p>
+              <p className="text-sm text-ink-500 dark:text-ink-400 dark:text-zinc-500">{tool.description}</p>
             </div>
           </div>
 
           <button
             onClick={handleShareTool}
-            className="self-start sm:self-center inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-medium shadow-sm transition"
+            className="self-start sm:self-center inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-black/[0.07] dark:border-white/[0.07] bg-black/[0.03] dark:bg-white/[0.06] hover:bg-black/[0.06] dark:hover:bg-white/[0.1] text-ink-700 dark:text-zinc-200 text-xs font-medium shadow-sm transition"
           >
             <Share2 className="w-3.5 h-3.5" />
             <span>Share Tool</span>
@@ -515,10 +533,10 @@ export default function ToolPage({ params }: ToolPageProps) {
         </div>
 
         {/* Main Processing Workspace */}
-        <div className="bg-white rounded-3xl border border-zinc-200 shadow-apple p-6 sm:p-8 mb-8">
+        <div className="surface rounded-3xl border border-black/[0.07] dark:border-white/[0.07] shadow-card dark:shadow-card-dark p-6 sm:p-8 mb-8">
           {/* Error Message Banner */}
           {errorMessage && (
-            <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-rose-800">
+            <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-rose-500/25 bg-rose-500/[0.08] p-4 text-xs text-rose-800 dark:text-rose-300">
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>{errorMessage}</span>
@@ -529,7 +547,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                   setErrorMessage(null);
                   handleExecuteTool();
                 }}
-                className="px-3 py-1 rounded-lg bg-rose-600 text-white font-medium hover:bg-rose-700 transition flex items-center gap-1 shrink-0"
+                className="focus-ring flex shrink-0 items-center gap-1 rounded-full bg-rose-600 px-3.5 py-1.5 font-semibold text-white transition-colors hover:bg-rose-500"
               >
                 <RefreshCw className="w-3 h-3" /> Retry
               </button>
@@ -538,22 +556,41 @@ export default function ToolPage({ params }: ToolPageProps) {
 
           {/* File Upload Zone */}
           {files.length === 0 ? (
-            <div className="border-2 border-dashed border-zinc-300 rounded-2xl p-10 text-center hover:border-zinc-400 transition-colors cursor-pointer relative bg-zinc-50/50">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              className={`relative cursor-pointer rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-200 ${
+                isDragging
+                  ? 'scale-[1.01] border-brand-500 bg-brand-500/[0.07] shadow-glow'
+                  : 'border-black/15 bg-black/[0.02] hover:border-brand-500/50 dark:border-white/15 dark:bg-white/[0.02]'
+              }`}
+            >
               <input
                 type="file"
                 multiple={tool.multipleFiles}
                 accept={tool.acceptedTypes.join(',')}
                 onChange={handleFileChange}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                aria-label={`Select ${tool.multipleFiles ? 'files' : 'a file'} for ${tool.name}`}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
               />
-              <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                <UploadCloud className="w-7 h-7" />
+              <div
+                className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-600 transition-transform duration-200 dark:text-brand-300 ${
+                  isDragging ? 'scale-110' : ''
+                }`}
+              >
+                <UploadCloud className="h-7 w-7" aria-hidden />
               </div>
-              <h3 className="text-base font-semibold text-zinc-900 mb-1">
-                Select or drop {tool.multipleFiles ? 'files' : 'file'} to process
+              <h3 className="mb-1 text-base font-semibold text-ink-900 dark:text-white">
+                {isDragging
+                  ? 'Drop to upload'
+                  : `Select or drop ${tool.multipleFiles ? 'files' : 'a file'} to process`}
               </h3>
-              <p className="text-xs text-zinc-500 mb-4">
-                Accepts {tool.acceptedTypes.join(', ')} up to 250 MB
+              <p className="mb-4 text-xs text-ink-500 dark:text-ink-400 dark:text-zinc-500">
+                Accepts {tool.acceptedTypes.join(', ')} &middot; limit depends on your plan
               </p>
               <button
                 type="button"
@@ -567,7 +604,7 @@ export default function ToolPage({ params }: ToolPageProps) {
               {/* Selected Files List */}
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-zinc-500">
                     Selected Files ({files.length})
                   </h4>
                   {tool.multipleFiles && (
@@ -588,19 +625,19 @@ export default function ToolPage({ params }: ToolPageProps) {
                   {files.map((file, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 bg-zinc-50/60 text-xs"
+                      className="flex items-center justify-between p-3.5 rounded-xl border border-black/[0.07] dark:border-white/[0.07] bg-black/[0.03] dark:bg-white/[0.04] text-xs"
                     >
                       <div className="flex items-center gap-3">
                         {tool.multipleFiles && (
-                          <span className="w-5 h-5 rounded-full bg-zinc-200 text-zinc-700 flex items-center justify-center text-[10px] font-bold">
+                          <span className="w-5 h-5 rounded-full bg-black/[0.07] dark:bg-white/[0.09] text-ink-700 dark:text-zinc-200 flex items-center justify-center text-[10px] font-bold">
                             {idx + 1}
                           </span>
                         )}
-                        <FileText className="w-4 h-4 text-zinc-500" />
+                        <FileText className="w-4 h-4 text-ink-500 dark:text-ink-400 dark:text-zinc-500" />
                         <div>
-                          <div className="font-medium text-zinc-900">{file.name}</div>
-                          <div className="text-[10px] text-zinc-500">
-                            {(file.size / (1024 * 1024)).toFixed(2)} MB
+                          <div className="font-medium text-ink-900 dark:text-white">{file.name}</div>
+                          <div className="text-[10px] text-ink-500 dark:text-ink-400 dark:text-zinc-500">
+                            {file.size < 1024 ? `${file.size} B` : file.size < 1048576 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / 1048576).toFixed(2)} MB`}
                           </div>
                         </div>
                       </div>
@@ -611,7 +648,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                               type="button"
                               onClick={() => handleMoveFile(idx, 'up')}
                               disabled={idx === 0}
-                              className="p-1 text-zinc-400 hover:text-zinc-700 disabled:opacity-20 transition-colors"
+                              className="p-1 text-ink-400 dark:text-zinc-500 hover:text-ink-700 dark:text-zinc-200 disabled:opacity-20 transition-colors"
                               title="Move Up"
                             >
                               <MoveUp className="w-3.5 h-3.5" />
@@ -620,7 +657,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                               type="button"
                               onClick={() => handleMoveFile(idx, 'down')}
                               disabled={idx === files.length - 1}
-                              className="p-1 text-zinc-400 hover:text-zinc-700 disabled:opacity-20 transition-colors"
+                              className="p-1 text-ink-400 dark:text-zinc-500 hover:text-ink-700 dark:text-zinc-200 disabled:opacity-20 transition-colors"
                               title="Move Down"
                             >
                               <MoveDown className="w-3.5 h-3.5" />
@@ -630,7 +667,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                         <button
                           type="button"
                           onClick={() => handleRemoveFile(idx)}
-                          className="text-zinc-400 hover:text-rose-600 p-1 transition-colors"
+                          className="text-ink-400 dark:text-zinc-500 hover:text-rose-600 p-1 transition-colors"
                           title="Remove File"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -641,8 +678,8 @@ export default function ToolPage({ params }: ToolPageProps) {
                 </div>
 
                 {tool.multipleFiles && (
-                  <label className="mt-3 flex items-center justify-center gap-2 p-3 border border-dashed border-zinc-300 rounded-xl bg-zinc-50/50 hover:bg-zinc-100/50 hover:border-zinc-400 cursor-pointer transition-colors text-xs text-zinc-600">
-                    <UploadCloud className="w-4 h-4 text-zinc-500" />
+                  <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-black/15 bg-black/[0.02] p-3 text-xs text-ink-600 transition-colors hover:border-brand-500/50 hover:bg-brand-500/[0.05] dark:border-white/15 dark:bg-white/[0.02] dark:text-ink-400 dark:text-zinc-500">
+                    <UploadCloud className="w-4 h-4 text-ink-500 dark:text-ink-400 dark:text-zinc-500" />
                     <span>+ Add more files (click to browse or drop files)</span>
                     <input
                       type="file"
@@ -656,8 +693,8 @@ export default function ToolPage({ params }: ToolPageProps) {
               </div>
 
               {/* Tool Parameters Configuration */}
-              <div className="pt-4 border-t border-zinc-100">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4 flex items-center gap-1.5">
+              <div className="pt-4 border-t border-black/[0.07] dark:border-white/[0.07]">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-400 dark:text-zinc-500 mb-4 flex items-center gap-1.5">
                   <Settings2 className="w-3.5 h-3.5" /> Options & Settings
                 </h4>
 
@@ -675,12 +712,12 @@ export default function ToolPage({ params }: ToolPageProps) {
                         onClick={() => setCompressionLevel(lvl.id as any)}
                         className={`p-3 text-left rounded-xl border transition-all ${
                           compressionLevel === lvl.id
-                            ? 'border-blue-600 bg-blue-50/50 ring-1 ring-blue-600'
-                            : 'border-zinc-200 hover:border-zinc-300'
+                            ? 'border-brand-500 bg-brand-500/10 ring-1 ring-brand-500 text-ink-900 dark:text-white'
+                            : 'border-black/[0.07] dark:border-white/[0.07] hover:border-black/15 dark:border-white/15'
                         }`}
                       >
-                        <div className="font-semibold text-xs text-zinc-900">{lvl.label}</div>
-                        <div className="text-[10px] text-zinc-500 mt-0.5">{lvl.desc}</div>
+                        <div className="font-semibold text-xs text-ink-900 dark:text-white">{lvl.label}</div>
+                        <div className="text-[10px] text-ink-500 dark:text-ink-400 dark:text-zinc-500 mt-0.5">{lvl.desc}</div>
                       </button>
                     ))}
                   </div>
@@ -690,18 +727,18 @@ export default function ToolPage({ params }: ToolPageProps) {
                 {tool.id === 'watermark' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                         Watermark Text
                       </label>
                       <input
                         type="text"
                         value={watermarkText}
                         onChange={(e) => setWatermarkText(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                         Opacity ({watermarkOpacity}%)
                       </label>
                       <input
@@ -719,7 +756,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                 {/* 3. Split PDF */}
                 {tool.id === 'split' && (
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                       Extract Page Ranges
                     </label>
                     <input
@@ -727,9 +764,9 @@ export default function ToolPage({ params }: ToolPageProps) {
                       placeholder="e.g. 1-3, 5, 8-10"
                       value={pageRange}
                       onChange={(e) => setPageRange(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                     />
-                    <p className="text-[11px] text-zinc-400 mt-1">Specify comma-separated page numbers or ranges to extract.</p>
+                    <p className="text-[11px] text-ink-400 dark:text-zinc-500 mt-1">Specify comma-separated page numbers or ranges to extract.</p>
                   </div>
                 )}
 
@@ -743,8 +780,8 @@ export default function ToolPage({ params }: ToolPageProps) {
                         onClick={() => setRotationDegrees(deg)}
                         className={`px-4 py-2 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-all ${
                           rotationDegrees === deg
-                            ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
-                            : 'border-zinc-200 hover:border-zinc-300'
+                            ? 'border-brand-500 bg-brand-500/10 text-brand-700 dark:text-brand-200 ring-1 ring-brand-500'
+                            : 'border-black/[0.07] dark:border-white/[0.07] hover:border-black/15 dark:border-white/15'
                         }`}
                       >
                         <RotateCw className="w-3.5 h-3.5" /> Rotate {deg}° Clockwise
@@ -756,7 +793,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                 {/* 5. Delete Pages */}
                 {tool.id === 'delete-pages' && (
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                       Pages to Delete
                     </label>
                     <input
@@ -764,16 +801,16 @@ export default function ToolPage({ params }: ToolPageProps) {
                       placeholder="e.g. 1, 3, 5"
                       value={deletePages}
                       onChange={(e) => setDeletePages(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                     />
-                    <p className="text-[11px] text-zinc-400 mt-1">Target page numbers (1-indexed) to permanently remove from the document.</p>
+                    <p className="text-[11px] text-ink-400 dark:text-zinc-500 mt-1">Target page numbers (1-indexed) to permanently remove from the document.</p>
                   </div>
                 )}
 
                 {/* 6. Extract Pages */}
                 {tool.id === 'extract-pages' && (
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                       Pages to Extract
                     </label>
                     <input
@@ -781,16 +818,16 @@ export default function ToolPage({ params }: ToolPageProps) {
                       placeholder="e.g. 1, 3, 5-8"
                       value={extractPages}
                       onChange={(e) => setExtractPages(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                     />
-                    <p className="text-[11px] text-zinc-400 mt-1">Selected pages will be preserved and pulled into a new clean PDF document.</p>
+                    <p className="text-[11px] text-ink-400 dark:text-zinc-500 mt-1">Selected pages will be preserved and pulled into a new clean PDF document.</p>
                   </div>
                 )}
 
                 {/* 7. Reorder Pages */}
                 {tool.id === 'reorder-pages' && (
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                       New Page Order Sequence
                     </label>
                     <input
@@ -798,16 +835,16 @@ export default function ToolPage({ params }: ToolPageProps) {
                       placeholder="e.g. 3, 2, 1 or 2, 1, 3"
                       value={reorderOrder}
                       onChange={(e) => setReorderOrder(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                     />
-                    <p className="text-[11px] text-zinc-400 mt-1">Enter the desired page sequence separated by commas.</p>
+                    <p className="text-[11px] text-ink-400 dark:text-zinc-500 mt-1">Enter the desired page sequence separated by commas.</p>
                   </div>
                 )}
 
                 {/* 8. Encrypt PDF */}
                 {tool.id === 'encrypt' && (
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                       Document Password Protection
                     </label>
                     <input
@@ -815,16 +852,16 @@ export default function ToolPage({ params }: ToolPageProps) {
                       placeholder="Enter strong 8+ character password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                     />
-                    <p className="text-[11px] text-zinc-400 mt-1">Applies AES-256 standard cryptographic encryption with permission locks.</p>
+                    <p className="text-[11px] text-ink-400 dark:text-zinc-500 mt-1">Applies AES-256 standard cryptographic encryption with permission locks.</p>
                   </div>
                 )}
 
                 {/* 9. Decrypt PDF */}
                 {tool.id === 'decrypt' && (
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                       Current Document Password
                     </label>
                     <input
@@ -832,9 +869,9 @@ export default function ToolPage({ params }: ToolPageProps) {
                       placeholder="Enter password to unlock and decrypt document"
                       value={unlockPassword}
                       onChange={(e) => setUnlockPassword(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                     />
-                    <p className="text-[11px] text-zinc-400 mt-1">Decrypts and unlocks the PDF for unrestricted printing and copying.</p>
+                    <p className="text-[11px] text-ink-400 dark:text-zinc-500 mt-1">Decrypts and unlocks the PDF for unrestricted printing and copying.</p>
                   </div>
                 )}
 
@@ -843,28 +880,28 @@ export default function ToolPage({ params }: ToolPageProps) {
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-medium text-zinc-700 mb-1">Bates Prefix</label>
+                        <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Bates Prefix</label>
                         <input
                           type="text"
                           value={batesPrefix}
                           onChange={(e) => setBatesPrefix(e.target.value)}
                           placeholder="e.g. BATES, CASE-2026, CONF"
-                          className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-zinc-700 mb-1">Starting Number</label>
+                        <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Starting Number</label>
                         <input
                           type="number"
                           min="1"
                           value={batesStartNumber}
                           onChange={(e) => setBatesStartNumber(parseInt(e.target.value) || 1)}
-                          className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                         />
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1">Stamp Position</label>
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Stamp Position</label>
                       <div className="grid grid-cols-4 gap-2">
                         {[
                           { id: 'bottom-right', label: 'Bottom Right' },
@@ -878,8 +915,8 @@ export default function ToolPage({ params }: ToolPageProps) {
                             onClick={() => setBatesPosition(pos.id as any)}
                             className={`p-2 text-center text-xs font-medium rounded-lg border transition-all ${
                               batesPosition === pos.id
-                                ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
-                                : 'border-zinc-200 hover:border-zinc-300'
+                                ? 'border-brand-500 bg-brand-500/10 text-brand-700 dark:text-brand-200 ring-1 ring-brand-500'
+                                : 'border-black/[0.07] dark:border-white/[0.07] hover:border-black/15 dark:border-white/15'
                             }`}
                           >
                             {pos.label}
@@ -894,7 +931,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                 {tool.id === 'redact' && (
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1">
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                         Sensitive Keywords & PII to Permanently Redact
                       </label>
                       <input
@@ -902,13 +939,13 @@ export default function ToolPage({ params }: ToolPageProps) {
                         value={redactKeywords}
                         onChange={(e) => setRedactKeywords(e.target.value)}
                         placeholder="Comma separated: SSN, CONFIDENTIAL, SECRET, PIN"
-                        className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                       />
                     </div>
                     <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[11px] text-red-800 flex items-start gap-2">
                       <Shield className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                       <div>
-                        <span className="font-semibold">DoD 5220.22-M Irreversible Sanitization:</span> Targeted keywords and underlying vector text streams are physically zeroed and permanently removed.
+                        <span className="font-semibold">Irreversible redaction:</span> Targeted keywords and underlying vector text streams are physically zeroed and permanently removed.
                       </div>
                     </div>
                   </div>
@@ -917,7 +954,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                 {/* 12. Digital Signature Studio */}
                 {tool.id === 'sign' && (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+                    <div className="flex items-center justify-between border-b border-black/[0.07] dark:border-white/[0.07] pb-3">
                       <div className="flex gap-2">
                         <button
                           type="button"
@@ -925,7 +962,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                           className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
                             signatureMode === 'draw'
                               ? 'bg-blue-50 border-blue-600 text-blue-700'
-                              : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'
+                              : 'border-black/[0.07] dark:border-white/[0.07] text-ink-600 dark:text-ink-400 dark:text-zinc-500 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
                           }`}
                         >
                           Draw Signature
@@ -936,7 +973,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                           className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
                             signatureMode === 'type'
                               ? 'bg-blue-50 border-blue-600 text-blue-700'
-                              : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'
+                              : 'border-black/[0.07] dark:border-white/[0.07] text-ink-600 dark:text-ink-400 dark:text-zinc-500 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
                           }`}
                         >
                           Type Cursive
@@ -945,7 +982,7 @@ export default function ToolPage({ params }: ToolPageProps) {
 
                       {/* Ink Palette */}
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-zinc-400 mr-1">Ink:</span>
+                        <span className="text-[11px] text-ink-400 dark:text-zinc-500 mr-1">Ink:</span>
                         {[
                           { color: '#0f172a', label: 'Obsidian' },
                           { color: '#1d4ed8', label: 'Navy' },
@@ -966,7 +1003,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                     </div>
 
                     {signatureMode === 'draw' ? (
-                      <div className="relative border-2 border-dashed border-zinc-300 rounded-xl bg-zinc-50/50 p-2">
+                      <div className="relative border-2 border-dashed border-black/15 dark:border-white/15 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] p-2">
                         <canvas
                           ref={canvasRef}
                           width={600}
@@ -978,12 +1015,12 @@ export default function ToolPage({ params }: ToolPageProps) {
                           onTouchStart={startDrawing}
                           onTouchMove={draw}
                           onTouchEnd={stopDrawing}
-                          className="w-full h-36 bg-white rounded-lg cursor-crosshair touch-none border border-zinc-200"
+                          className="w-full h-36 bg-white rounded-lg cursor-crosshair touch-none border border-black/[0.07] dark:border-white/[0.07]"
                         />
                         <button
                           type="button"
                           onClick={clearCanvas}
-                          className="absolute bottom-4 right-4 inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-md transition-colors"
+                          className="absolute bottom-4 right-4 inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium bg-black/[0.05] dark:bg-white/[0.07] hover:bg-black/[0.07] dark:bg-white/[0.09] text-ink-700 dark:text-zinc-200 rounded-md transition-colors"
                         >
                           <Eraser className="w-3 h-3" /> Clear Ink
                         </button>
@@ -995,10 +1032,10 @@ export default function ToolPage({ params }: ToolPageProps) {
                           value={signatureText}
                           onChange={(e) => setSignatureText(e.target.value)}
                           placeholder="Type your full legal name"
-                          className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                         />
                         <div
-                          className="p-4 bg-zinc-50 border border-zinc-200 rounded-xl text-center text-2xl tracking-wide select-none"
+                          className="p-4 bg-black/[0.03] dark:bg-white/[0.04] border border-black/[0.07] dark:border-white/[0.07] rounded-xl text-center text-2xl tracking-wide select-none"
                           style={{
                             color: signatureColor,
                             fontFamily: 'cursive, "Brush Script MT", "Segoe Script", sans-serif',
@@ -1011,36 +1048,36 @@ export default function ToolPage({ params }: ToolPageProps) {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                       <div>
-                        <label className="block text-xs font-medium text-zinc-700 mb-1">Signer Name</label>
+                        <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Signer Name</label>
                         <input
                           type="text"
                           value={signerName}
                           onChange={(e) => setSignerName(e.target.value)}
-                          className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-zinc-700 mb-1">Signer Title / Role</label>
+                        <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Signer Title / Role</label>
                         <input
                           type="text"
                           value={signerTitle}
                           onChange={(e) => setSignerTitle(e.target.value)}
-                          className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                         />
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 pt-1 text-xs text-zinc-600">
+                    <div className="flex items-center gap-2 pt-1 text-xs text-ink-600 dark:text-ink-400 dark:text-zinc-500">
                       <input
                         type="checkbox"
                         id="audit-trail"
                         checked={includeAuditTrail}
                         onChange={(e) => setIncludeAuditTrail(e.target.checked)}
-                        className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                        className="rounded border-black/15 dark:border-white/15 text-blue-600 focus:ring-blue-500"
                       />
                       <label htmlFor="audit-trail" className="flex items-center gap-1.5 cursor-pointer">
                         <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Embed Cryptographic Audit Trail & SHA-256 Integrity Hash (eIDAS & ESIGN Compliant)</span>
+                        <span>Include UTC timestamp and SHA-256 fingerprint in the stamp (not a certificate-based signature)</span>
                       </label>
                     </div>
                   </div>
@@ -1061,7 +1098,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-2">
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-2">
                         Comparison Threshold Sensitivity
                       </label>
                       <div className="grid grid-cols-3 gap-3">
@@ -1076,12 +1113,12 @@ export default function ToolPage({ params }: ToolPageProps) {
                             onClick={() => setCompareSensitivity(item.id as any)}
                             className={`p-3 text-left rounded-xl border transition-all ${
                               compareSensitivity === item.id
-                                ? 'border-blue-600 bg-blue-50/50 ring-1 ring-blue-600'
-                                : 'border-zinc-200 hover:border-zinc-300'
+                                ? 'border-brand-500 bg-brand-500/10 ring-1 ring-brand-500 text-ink-900 dark:text-white'
+                                : 'border-black/[0.07] dark:border-white/[0.07] hover:border-black/15 dark:border-white/15'
                             }`}
                           >
-                            <div className="font-semibold text-xs text-zinc-900">{item.label}</div>
-                            <div className="text-[10px] text-zinc-500 mt-0.5">{item.desc}</div>
+                            <div className="font-semibold text-xs text-ink-900 dark:text-white">{item.label}</div>
+                            <div className="text-[10px] text-ink-500 dark:text-ink-400 dark:text-zinc-500 mt-0.5">{item.desc}</div>
                           </button>
                         ))}
                       </div>
@@ -1093,39 +1130,39 @@ export default function ToolPage({ params }: ToolPageProps) {
                 {tool.id === 'metadata' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1">Document Title</label>
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Document Title</label>
                       <input
                         type="text"
                         value={metaTitle}
                         onChange={(e) => setMetaTitle(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1">Author / Organization</label>
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Author / Organization</label>
                       <input
                         type="text"
                         value={metaAuthor}
                         onChange={(e) => setMetaAuthor(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1">Subject Matter</label>
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Subject Matter</label>
                       <input
                         type="text"
                         value={metaSubject}
                         onChange={(e) => setMetaSubject(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1">Search Keywords (Comma Separated)</label>
+                      <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">Search Keywords (Comma Separated)</label>
                       <input
                         type="text"
                         value={metaKeywords}
                         onChange={(e) => setMetaKeywords(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring"
                       />
                     </div>
                   </div>
@@ -1134,13 +1171,13 @@ export default function ToolPage({ params }: ToolPageProps) {
                 {/* 15. OCR Multi-lingual Language Selector */}
                 {tool.id === 'ocr' && (
                   <div className="max-w-md">
-                    <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    <label className="block text-xs font-medium text-ink-700 dark:text-zinc-200 mb-1">
                       OCR Document Primary Language
                     </label>
                     <select
                       value={ocrLanguage}
                       onChange={(e) => setOcrLanguage(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                      className="w-full px-3 py-2 text-xs border border-black/[0.07] dark:border-white/[0.07] rounded-lg focus-ring bg-white/70 dark:bg-white/[0.06] text-ink-900 dark:text-white"
                     >
                       <option value="eng">English (Latin OCR Engine 5.5)</option>
                       <option value="fra">French (Français)</option>
@@ -1222,7 +1259,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                 <div className="pt-4 flex justify-end">
                   <button
                     onClick={handleExecuteTool}
-                    className="px-6 py-2.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs shadow-md transition-all flex items-center gap-2"
+                    className="focus-ring flex items-center gap-2 rounded-full bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition-all hover:bg-brand-500 hover:shadow-glow-lg active:translate-y-px"
                   >
                     <span>Execute {tool.name}</span>
                   </button>
@@ -1233,19 +1270,19 @@ export default function ToolPage({ params }: ToolPageProps) {
 
           {/* Stepper Progress Bar */}
           {isProcessing && (
-            <div className="mt-6 pt-6 border-t border-zinc-100">
+            <div className="mt-6 pt-6 border-t border-black/[0.07] dark:border-white/[0.07]">
               <div className="mb-4 text-center">
-                <div className="text-sm font-semibold text-zinc-900 mb-1">
+                <div className="text-sm font-semibold text-ink-900 dark:text-white mb-1">
                   Processing your document...
                 </div>
-                <div className="text-xs text-zinc-500">
+                <div className="text-xs text-ink-500 dark:text-ink-400 dark:text-zinc-500">
                   Step {processingStep} of 4: {steps[processingStep - 1]?.title}
                 </div>
               </div>
 
-              <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden mb-6">
+              <div className="mb-6 h-2 w-full overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.09]">
                 <div
-                  className="bg-blue-600 h-full transition-all duration-500"
+                  className="h-full rounded-full bg-gradient-to-r from-brand-600 to-violet-500 transition-all duration-500"
                   style={{ width: `${(processingStep / 4) * 100}%` }}
                 />
               </div>
@@ -1259,15 +1296,15 @@ export default function ToolPage({ params }: ToolPageProps) {
                         ? 'text-emerald-700 bg-emerald-50/50'
                         : processingStep === i + 1
                         ? 'text-blue-700 bg-blue-50/50 font-medium'
-                        : 'text-zinc-400'
+                        : 'text-ink-400 dark:text-zinc-500'
                     }`}
                   >
                     {processingStep > i + 1 ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     ) : processingStep === i + 1 ? (
-                      <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
                     ) : (
-                      <div className="w-4 h-4 rounded-full border border-zinc-300" />
+                      <div className="w-4 h-4 rounded-full border border-black/15 dark:border-white/15" />
                     )}
                     <div>
                       <span>{st.title}</span> – <span className="opacity-80">{st.desc}</span>
@@ -1280,25 +1317,39 @@ export default function ToolPage({ params }: ToolPageProps) {
 
           {/* Download & Success Box */}
           {isCompleted && (
-            <div className="mt-6 pt-6 border-t border-zinc-100">
-              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-center">
-                <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center mx-auto mb-3 shadow-md shadow-emerald-500/20">
-                  <CheckCircle2 className="w-6 h-6" />
+            <div className="mt-6 pt-6 border-t border-black/[0.07] dark:border-white/[0.07]">
+              <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.08] p-6 text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white shadow-md shadow-emerald-500/20">
+                  <CheckCircle2 className="h-6 w-6" aria-hidden />
                 </div>
-                <h3 className="text-lg font-semibold text-emerald-950 mb-1">
-                  Document Ready for Download!
+                <h3 className="mb-1 text-lg font-semibold text-emerald-900 dark:text-emerald-200">
+                  Your document is ready
                 </h3>
-                <p className="text-xs text-emerald-800 mb-5 max-w-md mx-auto">
-                  {tool.id === 'compress'
-                    ? 'Reduced from 4.8 MB to 1.1 MB (77% file size saved) with flawless rendering.'
-                    : 'Your files have been transformed and verified by our enterprise pipeline.'}
+                <p className="mx-auto mb-5 max-w-md text-xs text-emerald-800 dark:text-emerald-300/90">
+                  {(() => {
+                    // Only state sizes the pipeline actually reported.
+                    const inputBytes = files.reduce((sum, f) => sum + f.size, 0);
+                    const size = (n: number) => {
+                      if (n < 1024) return `${n} B`;
+                      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+                      return `${(n / 1024 / 1024).toFixed(2)} MB`;
+                    };
+                    if (outputBytes && inputBytes > 0) {
+                      const delta = Math.round((1 - outputBytes / inputBytes) * 100);
+                      return delta > 0
+                        ? `${size(inputBytes)} → ${size(outputBytes)} (${delta}% smaller).`
+                        : `${size(inputBytes)} → ${size(outputBytes)}.`;
+                    }
+                    if (outputBytes) return `Output size: ${size(outputBytes)}.`;
+                    return 'Processing finished. Download your file below.';
+                  })()}
                 </p>
 
                 <div className="flex flex-wrap justify-center gap-3">
                   <button
                     type="button"
                     onClick={handleTriggerDownload}
-                    className="px-6 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
+                    className="focus-ring flex cursor-pointer items-center gap-2 rounded-full bg-emerald-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-500/25 transition-all hover:bg-emerald-500 active:translate-y-px"
                   >
                     <Download className="w-4 h-4" /> {getDownloadButtonLabel()}
                   </button>
@@ -1308,7 +1359,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                       setIsCompleted(false);
                       setDownloadUrl(null);
                     }}
-                    className="px-4 py-2.5 rounded-full bg-white border border-emerald-300 text-emerald-800 text-xs font-medium hover:bg-emerald-100/50 transition-colors"
+                    className="px-4 py-2.5 rounded-full border border-emerald-500/30 bg-transparent text-emerald-800 dark:text-emerald-300 text-xs font-medium hover:bg-emerald-100/50 transition-colors"
                   >
                     Process Another File
                   </button>
@@ -1316,7 +1367,7 @@ export default function ToolPage({ params }: ToolPageProps) {
 
                 <div className="mt-4 text-[10px] text-emerald-700 flex items-center justify-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Auto-delete in 23h 59m · DoD 5220.22-M zero retention guarantee</span>
+                  <span>Your file stays available from a signed link that expires.</span>
                 </div>
               </div>
             </div>
@@ -1324,10 +1375,10 @@ export default function ToolPage({ params }: ToolPageProps) {
         </div>
 
         {/* Tool FAQs Accordion */}
-        <div className="bg-white rounded-3xl border border-zinc-200 shadow-sm p-6 sm:p-8 mb-8">
+        <div className="surface rounded-3xl border border-black/[0.07] dark:border-white/[0.07] shadow-sm p-6 sm:p-8 mb-8">
           <div className="flex items-center gap-2 mb-6">
             <HelpCircle className="w-5 h-5 text-blue-600" />
-            <h3 className="text-lg font-semibold text-zinc-900">
+            <h3 className="text-lg font-semibold text-ink-900 dark:text-white">
               Frequently Asked Questions about {tool.name}
             </h3>
           </div>
@@ -1336,22 +1387,22 @@ export default function ToolPage({ params }: ToolPageProps) {
             {toolFaqs.map((faq, idx) => (
               <div
                 key={idx}
-                className="border border-zinc-100 rounded-2xl overflow-hidden bg-zinc-50/50"
+                className="border border-black/[0.07] dark:border-white/[0.07] rounded-2xl overflow-hidden bg-black/[0.02] dark:bg-white/[0.02]"
               >
                 <button
                   type="button"
                   onClick={() => setOpenFaqIdx(openFaqIdx === idx ? null : idx)}
-                  className="w-full text-left px-5 py-3.5 flex items-center justify-between font-medium text-xs text-zinc-800 hover:bg-zinc-100/60 transition"
+                  className="w-full text-left px-5 py-3.5 flex items-center justify-between font-medium text-xs text-ink-800 dark:text-zinc-100 hover:bg-black/[0.04] dark:bg-white/[0.05] transition"
                 >
                   <span>{faq.q}</span>
                   <ChevronDown
-                    className={`w-4 h-4 text-zinc-400 transition-transform ${
+                    className={`w-4 h-4 text-ink-400 dark:text-zinc-500 transition-transform ${
                       openFaqIdx === idx ? 'rotate-180 text-blue-600' : ''
                     }`}
                   />
                 </button>
                 {openFaqIdx === idx && (
-                  <div className="px-5 pb-4 pt-1 text-xs text-zinc-600 leading-relaxed border-t border-zinc-100 bg-white">
+                  <div className="px-5 pb-4 pt-1 text-xs text-ink-600 dark:text-ink-400 dark:text-zinc-500 leading-relaxed border-t border-black/[0.07] dark:border-white/[0.07] bg-black/[0.02] dark:bg-white/[0.02]">
                     {faq.a}
                   </div>
                 )}
@@ -1362,7 +1413,7 @@ export default function ToolPage({ params }: ToolPageProps) {
 
         {/* Related Tools Recommendation */}
         <div className="mb-10">
-          <h3 className="text-base font-semibold text-zinc-900 mb-4">
+          <h3 className="text-base font-semibold text-ink-900 dark:text-white mb-4">
             Related Document Processing Tools
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1370,7 +1421,7 @@ export default function ToolPage({ params }: ToolPageProps) {
               <Link
                 key={rt.id}
                 href={`/tools/${rt.slug}`}
-                className="p-4 rounded-2xl bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-apple transition group flex flex-col justify-between"
+                className="p-4 rounded-2xl surface border border-black/[0.07] dark:border-white/[0.07] hover:border-black/15 dark:border-white/15 hover:shadow-card dark:hover:shadow-card-dark transition group flex flex-col justify-between"
               >
                 <div className="flex items-center gap-3 mb-2">
                   <div
@@ -1378,11 +1429,11 @@ export default function ToolPage({ params }: ToolPageProps) {
                   >
                     <FileText className="w-4 h-4" />
                   </div>
-                  <span className="font-semibold text-xs text-zinc-900 group-hover:text-blue-600 transition">
+                  <span className="font-semibold text-xs text-ink-900 dark:text-white group-hover:text-blue-600 transition">
                     {rt.name}
                   </span>
                 </div>
-                <p className="text-[11px] text-zinc-500 line-clamp-2">
+                <p className="text-[11px] text-ink-500 dark:text-ink-400 dark:text-zinc-500 line-clamp-2">
                   {rt.description}
                 </p>
               </Link>

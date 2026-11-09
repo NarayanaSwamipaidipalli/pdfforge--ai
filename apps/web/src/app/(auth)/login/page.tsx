@@ -201,33 +201,40 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen bg-[#fbfbfd] dark:bg-black flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <div className="relative flex min-h-screen flex-col justify-center overflow-hidden py-12 sm:px-6 lg:px-8">
+      {/* Decorative backdrop */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 bg-grid mask-fade opacity-60" />
+        <div className="absolute left-1/2 top-[-10%] h-[460px] w-[680px] -translate-x-1/2 rounded-full bg-brand-500/20 blur-[130px]" />
+        <div className="absolute bottom-[-10%] right-[10%] h-[300px] w-[300px] rounded-full bg-violet-500/12 blur-[110px]" />
+      </div>
+
       {/* Brand Header */}
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
-            <FileCheck2 className="w-6 h-6" />
-          </div>
-          <span className="font-semibold text-xl tracking-tight text-zinc-900 dark:text-white flex items-center gap-1.5">
+      <div className="text-center sm:mx-auto sm:w-full sm:max-w-md">
+        <Link href="/" className="focus-ring group mb-6 inline-flex items-center gap-2.5 rounded-lg">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-glow transition-transform duration-200 group-hover:scale-105">
+            <FileCheck2 className="h-5 w-5" aria-hidden />
+          </span>
+          <span className="text-xl font-semibold tracking-tight text-ink-900 dark:text-white">
             Doxera
           </span>
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-          Sign in to your account
+        <h1 className="text-balance text-3xl font-bold tracking-tight text-ink-900 dark:text-white">
+          Welcome back
         </h1>
-        <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+        <p className="mt-2 text-sm text-ink-500 dark:text-zinc-400">
           Don&apos;t have an account?{' '}
           <Link
             href="/signup"
-            className="text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+            className="focus-ring rounded font-semibold text-brand-600 underline-offset-4 hover:underline dark:text-brand-300"
           >
-            Create Account
+            Create one
           </Link>
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4">
-        <div className="bg-white dark:bg-zinc-900 py-8 px-6 sm:px-10 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
+      <div className="mt-9 px-4 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="glass-panel ring-gradient space-y-6 rounded-3xl px-6 py-8 shadow-card dark:shadow-card-dark sm:px-10">
           {error && (
             <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
@@ -240,7 +247,7 @@ function LoginForm() {
             type="button"
             onClick={handleGoogleAuth}
             disabled={googleLoading}
-            className="w-full py-2.5 px-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold shadow-sm transition-all duration-200 flex items-center justify-center gap-2.5 disabled:opacity-60"
+            className="focus-ring flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-black/10 bg-white/70 px-4 text-sm font-semibold text-ink-800 transition-colors duration-200 hover:bg-white disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.06] dark:text-zinc-100 dark:hover:bg-white/[0.11]"
           >
             {googleLoading ? (
               <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
@@ -272,7 +279,7 @@ function LoginForm() {
               <div className="w-full border-t border-zinc-200 dark:border-zinc-800" />
             </div>
             <div className="relative flex justify-center text-xs">
-              <span className="px-3 bg-white dark:bg-zinc-900 text-zinc-400">
+              <span className="rounded-full bg-[var(--background)] px-3 text-ink-400 dark:text-zinc-500">
                 or sign in with email
               </span>
             </div>
@@ -281,7 +288,7 @@ function LoginForm() {
           {/* Traditional Email / Password Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+              <label className="mb-1.5 block text-xs font-semibold text-ink-700 dark:text-zinc-300">
                 Email Address
               </label>
               <div className="relative">
@@ -290,7 +297,7 @@ function LoginForm() {
                   placeholder="name@company.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  className="focus-ring w-full rounded-xl border border-black/10 bg-white/60 px-4 py-2.5 text-sm text-ink-900 transition-colors placeholder:text-ink-400 dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-zinc-500"
                   required
                 />
                 <Mail className="w-3.5 h-3.5 text-zinc-400 absolute right-3 top-2.5" />
@@ -299,7 +306,7 @@ function LoginForm() {
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                <label className="block text-xs font-semibold text-ink-700 dark:text-zinc-300">
                   Password
                 </label>
                 <Link
@@ -315,7 +322,7 @@ function LoginForm() {
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all pr-9"
+                  className="focus-ring w-full rounded-xl border border-black/10 bg-white/60 py-2.5 pl-4 pr-10 text-sm text-ink-900 transition-colors placeholder:text-ink-400 dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-zinc-500"
                   required
                 />
                 <button
@@ -332,7 +339,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5 disabled:opacity-60"
+              className="focus-ring flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand-600 px-4 text-sm font-semibold text-white shadow-glow transition-all duration-200 hover:bg-brand-500 hover:shadow-glow-lg active:translate-y-px disabled:opacity-60"
             >
               {loading ? (
                 <>
@@ -362,7 +369,7 @@ function LoginForm() {
           {/* Security Assurance Badge */}
           <div className="pt-2 text-center text-[10px] text-zinc-400 flex items-center justify-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>256-Bit TLS Encryption & Zero-Retention Security</span>
+            <span>Uploaded files expire 24 hours after upload</span>
           </div>
         </div>
       </div>

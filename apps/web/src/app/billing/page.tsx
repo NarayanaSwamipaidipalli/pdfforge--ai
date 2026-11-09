@@ -1,988 +1,445 @@
-'use client';
-import { completeRazorpayCheckout } from '@/lib/razorpay-checkout';
+﻿'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useAuthStore } from '@/lib/auth-store';
-import { useToast } from '@/components/ui/Toast';
+import { useRouter } from 'next/navigation';
 import {
-  CreditCard,
-  CheckCircle2,
-  Download,
-  Shield,
-  Zap,
-  ArrowRight,
-  HardDrive,
-  Cpu,
-  Receipt,
-  FileCheck2,
-  Sparkles,
-  AlertCircle,
-  Check,
-  Building,
-  Clock,
-  X,
-  RefreshCw,
-  AlertTriangle,
-  Lock,
+  ArrowLeft, ArrowRight, ArrowUpRight, AlertCircle, CalendarDays, CheckCircle2,
+  ChevronRight, CreditCard, Download, FileText, Layers3, Loader2, Receipt,
+  RefreshCw, ShieldCheck, Sparkles, Wallet, XCircle,
 } from 'lucide-react';
+import { ApiClient } from '@/lib/api-client';
+import { useAuthStore } from '@/lib/auth-store';
+import {
+  type BillingHistory, type BillingInterval, type BillingPlan, type PlanTier,
+  formatDate, formatMoney, selectCurrentSubscription, useBillingCatalog,
+} from '@/lib/billing';
+import { CheckoutModal } from '@/components/billing/CheckoutModal';
+import { BillingToggle, PlanCards } from '@/components/billing/PlanCards';
+import { Badge, Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
+import { Reveal } from '@/components/ui/Motion';
+import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 
-// Normalize API URL to prevent double '/api/v1' or missing '/api/v1'
-const rawApiUrl = '/api/v1';
-const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
-const API_V1 = `${API_BASE}/api/v1`;
+const tiers: PlanTier[] = ['FREE', 'PRO', 'BUSINESS', 'ENTERPRISE'];
+const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
 
-interface PlanDetail {
-  id: string;
-  tier: 'FREE' | 'PRO' | 'BUSINESS' | 'ENTERPRISE';
-  name: string;
-  priceMonthly: number;
-  priceYearly: number;
-  description: string;
-  features: string[];
-  recommended?: boolean;
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
-interface SubscriptionData {
-  id: string;
-  userId: string;
-  tier: string;
-  interval: string;
-  provider: string;
-  status: 'ACTIVE' | 'TRIALING' | 'PAST_DUE' | 'CANCELED' | 'INCOMPLETE';
-  currentPeriodStart: string;
-  currentPeriodEnd: string;
-  cancelAtPeriodEnd: boolean;
-  canceledAt?: string | null;
+function Status({ status }: { status: string }) {
+  const positive = ['COMPLETED', 'PAID', 'ACTIVE', 'TRIALING'].includes(status);
+  const failed = ['FAILED', 'UNPAID', 'PAST_DUE'].includes(status);
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+      positive
+        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+        : failed
+          ? 'border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+          : 'border-zinc-500/20 bg-zinc-500/10 text-zinc-600 dark:text-zinc-300'
+    }`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${positive ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-zinc-400'}`} />
+      {status.replaceAll('_', ' ').toLowerCase()}
+    </span>
+  );
 }
 
-interface InvoiceData {
-  id: string;
-  invoiceNumber: string;
-  amount: number;
-  currency: string;
-  status: string;
-  createdAt: string;
-}
-
-interface EnabledProviders {
-  stripe: boolean;
-  razorpay: boolean;
-  paypal: boolean;
-  providers: string[];
+function HistorySkeleton() {
+  return (
+    <div role="status" aria-label="Loading billing information" className="space-y-6">
+      <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
+        {[0, 1].map((index) => (
+          <Card key={index} className="p-6 sm:p-8">
+            <div className="skeleton h-4 w-28 rounded" />
+            <div className="skeleton mt-5 h-10 w-48 rounded-lg" />
+            <div className="skeleton mt-5 h-4 w-4/5 rounded" />
+            <div className="skeleton mt-8 h-10 w-full rounded-xl" />
+          </Card>
+        ))}
+      </div>
+      <Card className="p-6 sm:p-8">
+        <div className="skeleton h-5 w-44 rounded" />
+        {[0, 1, 2].map((index) => <div key={index} className="skeleton mt-6 h-12 rounded-xl" />)}
+      </Card>
+      <span className="sr-only">Loading your subscription and transactions.</span>
+    </div>
+  );
 }
 
 export default function BillingPage() {
-  const { user, token, syncProfile } = useAuthStore();
-  const { addToast } = useToast();
-
+  const router = useRouter();
+  const { user, token, isAuthenticated, isHydrated, syncProfile, refreshTokens } = useAuthStore();
+  const catalog = useBillingCatalog();
+  const [history, setHistory] = useState<BillingHistory | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [activeSub, setActiveSub] = useState<SubscriptionData | null>(null);
-  const [invoices, setInvoices] = useState<InvoiceData[]>([]);
-  const [enabledProviders, setEnabledProviders] = useState<EnabledProviders>({
-    stripe: true,
-    razorpay: true,
-    paypal: true,
-    providers: ['stripe', 'razorpay', 'paypal'],
-  });
-
-  // Billing Cycle Toggle (Monthly vs Yearly)
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('yearly');
-
-  // Checkout Modal State
-  const [selectedPlanForCheckout, setSelectedPlanForCheckout] = useState<PlanDetail | null>(null);
-  const [selectedProvider, setSelectedProvider] = useState<'stripe' | 'razorpay' | 'paypal'>('stripe');
-  const [couponCode, setCouponCode] = useState('');
-  const [couponData, setCouponData] = useState<any | null>(null);
-  const [couponLoading, setCouponLoading] = useState(false);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-
-  // Cancellation & Reactivation States
-  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'success' | 'info'; text: string } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [interval, setInterval] = useState<BillingInterval>('monthly');
+  const [selectedPlan, setSelectedPlan] = useState<BillingPlan | null>(null);
+  const [showCancel, setShowCancel] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [reactivating, setReactivating] = useState(false);
-  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [returnLoading, setReturnLoading] = useState(false);
+  const processedReturn = useRef(false);
+  const historyRequest = useRef(0);
+  const signedIn = isAuthenticated || Boolean(token);
 
-  const plans: PlanDetail[] = [
-    {
-      id: 'FREE',
-      tier: 'FREE',
-      name: 'Starter Community',
-      priceMonthly: 0,
-      priceYearly: 0,
-      description: 'Ideal for occasional document processing and evaluation.',
-      features: [
-        '50 PDF operations per day',
-        'Standard PyMuPDF compression',
-        'Max 25MB file upload limit',
-        '100 AI Studio RAG queries/mo',
-        'Community Forum Support',
-      ],
-    },
-    {
-      id: 'PRO',
-      tier: 'PRO',
-      name: 'Professional',
-      priceMonthly: 15,
-      priceYearly: 12,
-      description: 'For power users, legal practitioners, and financial analysts.',
-      features: [
-        'Unlimited PDF conversions',
-        '2GB single file upload capacity',
-        'OCR with multi-language Tesseract engine',
-        'GPT-4o & Claude 3.5 Sonnet RAG Studio',
-        '10,000 API requests / month',
-        'Priority Celery worker execution queue',
-      ],
-      recommended: true,
-    },
-    {
-      id: 'BUSINESS',
-      tier: 'BUSINESS',
-      name: 'Business & Teams',
-      priceMonthly: 49,
-      priceYearly: 40,
-      description: 'For growing organizations needing team collaboration and custom SLAs.',
-      features: [
-        'Unlimited high-speed Celery slots',
-        'Multi-tenant Team Workspace & RBAC',
-        'Audit logs & DoD 5220.22-M zero retention',
-        '100,000 API requests / month',
-        'Custom Webhooks & pgvector embeddings',
-        '99.99% SLA guarantee + dedicated rep',
-      ],
-    },
-    {
-      id: 'ENTERPRISE',
-      tier: 'ENTERPRISE',
-      name: 'Enterprise Cloud',
-      priceMonthly: 199,
-      priceYearly: 165,
-      description: 'Dedicated infrastructure, custom SLAs, and air-gapped on-premise RAG deployment.',
-      features: [
-        'Unlimited team seats & private storage',
-        'Dedicated worker pod cluster',
-        'Single Sign-On (SAML / Okta / Azure AD)',
-        'Deployment security review',
-        'Custom LLM & fine-tuned RAG models',
-        'Dedicated solutions architect',
-      ],
-    },
-  ];
-
-  const fetchBillingData = useCallback(async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) {
-      setLoadingHistory(false);
-      return;
-    }
-
+  const loadHistory = useCallback(async () => {
+    const requestId = ++historyRequest.current;
+    setRefreshing(true);
+    setHistoryError(null);
     try {
-      // Fetch enabled providers
-      const provRes = await fetch(`${API_V1}/billing/providers`);
-      if (provRes.ok) {
-        const provData = await provRes.json();
-        setEnabledProviders(provData);
-        if (provData.providers && provData.providers.length > 0) {
-          if (!provData[selectedProvider]) {
-            setSelectedProvider(provData.providers[0]);
-          }
-        }
+      const data = await ApiClient.request<BillingHistory>('/billing/history');
+      if (!data || !tiers.includes(data.currentPlan) || !Array.isArray(data.subscriptions) || !Array.isArray(data.payments) || !Array.isArray(data.invoices)) {
+        throw new Error('The billing service returned incomplete information. Please try again.');
       }
-
-      // Fetch user billing history & active subscription
-      const histRes = await fetch(`${API_V1}/billing/history`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (histRes.ok) {
-        const histData = await histRes.json();
-        setActiveSub(histData.subscription || null);
-        setInvoices(histData.invoices || []);
-      }
-    } catch (err) {
-      console.error('Error fetching billing data:', err);
+      if (requestId === historyRequest.current) setHistory(data);
+      return data;
+    } catch (error) {
+      if (requestId === historyRequest.current) setHistoryError(errorMessage(error, 'Your billing information could not be loaded.'));
+      return null;
     } finally {
-      setLoadingHistory(false);
+      if (requestId === historyRequest.current) {
+        setLoadingHistory(false);
+        setRefreshing(false);
+      }
     }
-  }, [token, selectedProvider]);
+  }, []);
 
   useEffect(() => {
-    fetchBillingData();
-  }, [fetchBillingData]);
-
-  // Open Checkout Modal
-  const handleOpenCheckoutModal = (plan: PlanDetail) => {
-    if (plan.tier === 'FREE') {
-      addToast('You are currently on the Starter tier.', 'info');
+    if (!isHydrated) return;
+    if (!signedIn) {
+      router.replace('/login?redirect=/billing');
       return;
     }
+    void loadHistory();
+  }, [isHydrated, signedIn, router, loadHistory]);
 
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) {
-      window.location.href = '/login?redirect=/billing';
-      return;
+  // Return URLs are navigation hints only. PayPal still requires authenticated
+  // server capture; Stripe entitlements arrive through verified webhooks.
+  useEffect(() => {
+    if (!isHydrated || !signedIn || processedReturn.current) return;
+    processedReturn.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const paypalOrder = params.get('token');
+    if (params.get('provider') === 'paypal' && paypalOrder && demoMode) {
+      setNotice({ kind: 'info', text: 'Payment confirmation is disabled in this shared demo.' });
+    } else if (params.get('provider') === 'paypal' && paypalOrder) {
+      setReturnLoading(true);
+      void (async () => {
+        try {
+          const result = await ApiClient.request<{ success?: boolean }>('/billing/paypal/capture', {
+            method: 'POST', body: JSON.stringify({ orderId: paypalOrder }),
+          });
+          if (result.success !== true) throw new Error('Payment confirmation is pending. Refresh your billing information before trying again.');
+          setNotice({ kind: 'success', text: 'The billing service verified your PayPal payment.' });
+          await Promise.all([loadHistory(), syncProfile()]);
+          window.history.replaceState({}, '', '/billing');
+        } catch (error) {
+          setActionError(errorMessage(error, 'Payment could not be verified. Check your payment history before trying again.'));
+        } finally {
+          setReturnLoading(false);
+        }
+      })();
+    } else if (params.has('session_id')) {
+      setNotice({ kind: 'info', text: 'You have returned from checkout. Subscription access below comes from the billing service. Refresh if your payment is still being processed.' });
+      window.history.replaceState({}, '', '/billing');
     }
+  }, [isHydrated, signedIn, loadHistory, syncProfile]);
 
-    setSelectedPlanForCheckout(plan);
-    setCouponCode('');
-    setCouponData(null);
+  const subscription = history ? selectCurrentSubscription(history) : null;
+  const currentPlan = history?.currentPlan;
+  const plan = catalog.plans.find((item) => item.tier === currentPlan);
+  const latestPaidInvoice = history?.invoices.find((invoice) => invoice.status === 'PAID');
+  // Cancellation currently targets the newest ACTIVE record, rather than a
+  // selectable subscription ID. Do not describe a different record as canceled.
+  const cancellationTarget = history?.subscriptions.find((item) => item.status === 'ACTIVE') || null;
+  const multipleActive = (history?.subscriptions.filter((item) => item.status === 'ACTIVE').length || 0) > 1;
+  const cancellationMatches = !subscription || cancellationTarget?.id === subscription.id;
+  const recurring = subscription?.provider === 'stripe' && Boolean(subscription.stripeSubscriptionId);
+  const cancelScheduled = subscription?.cancelAtPeriodEnd === true;
+  const canCancel = subscription?.status === 'ACTIVE' && !cancelScheduled;
+  const paymentProvider = subscription?.provider
+    ? subscription.provider.charAt(0).toUpperCase() + subscription.provider.slice(1)
+    : null;
+
+  const afterVerified = async () => {
+    setNotice({ kind: 'success', text: 'Your payment was verified by the billing service.' });
+    await Promise.all([loadHistory(), syncProfile()]);
   };
 
-  // Apply Coupon
-  const handleApplyCoupon = async () => {
-    if (!couponCode.trim() || !selectedPlanForCheckout) return;
-    setCouponLoading(true);
-    try {
-      const res = await fetch(`${API_V1}/billing/coupons/apply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: couponCode.trim().toUpperCase(),
-          tier: selectedPlanForCheckout.tier,
-          interval: billingCycle,
-        }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setCouponData(data);
-        addToast(`Coupon ${data.code} applied! You saved $${data.discountAmount}.`, 'success');
-      } else {
-        addToast(data.message || 'Invalid or expired coupon code', 'error');
+  const choosePlan = (nextPlan: BillingPlan) => {
+    setActionError(null);
+    if (!history || historyError) {
+      setActionError('Load your current billing information before changing plans.');
+      return;
+    }
+    if (nextPlan.tier === currentPlan) return;
+    if (nextPlan.tier === 'FREE') {
+      if (!cancellationMatches || multipleActive) {
+        setActionError('This account has multiple active paid periods. A move to Free cannot be scheduled from this page until those subscriptions have been reviewed.');
+        return;
       }
-    } catch (err: any) {
-      addToast(err.message || 'Failed to validate coupon', 'error');
-    } finally {
-      setCouponLoading(false);
-    }
-  };
-
-  // Execute Checkout Session
-  const handleExecuteCheckout = async () => {
-    if (!selectedPlanForCheckout) return;
-
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) {
-      window.location.href = '/login?redirect=/billing';
+      setShowCancel(true);
       return;
     }
-
-    setCheckoutLoading(true);
-    try {
-      const res = await fetch(`${API_V1}/billing/checkout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          tier: selectedPlanForCheckout.tier,
-          provider: selectedProvider,
-          interval: billingCycle,
-          couponCode: couponData?.code || undefined,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Checkout failed');
-
-      if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
-      } else if (data.approvalUrl) {
-        window.location.href = data.approvalUrl;
-      } else if (data.orderId) {
-        const result = await completeRazorpayCheckout(data, authToken);
-        addToast(result.message || 'Payment verified.', 'success');
-        setSelectedPlanForCheckout(null);
-        await syncProfile();
-        await fetchBillingData();
-      } else {
-        addToast(`Subscription upgraded to ${selectedPlanForCheckout.name}!`, 'success');
-        setSelectedPlanForCheckout(null);
-        await syncProfile();
-        await fetchBillingData();
-      }
-    } catch (err: any) {
-      addToast(err.message || 'Checkout could not be completed', 'error');
-    } finally {
-      setCheckoutLoading(false);
+    if (tiers.indexOf(nextPlan.tier) < tiers.indexOf(history.currentPlan)) {
+      setActionError('Switching to a lower paid plan is not currently supported. You can move to Free at the end of your paid period, then choose another plan.');
+      return;
     }
+    setSelectedPlan(nextPlan);
   };
 
-  // Cancel Subscription
-  const handleCancelSubscription = async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
-
+  const cancelSubscription = async () => {
+    if (demoMode || canceling || !cancellationMatches || multipleActive) return;
     setCanceling(true);
+    setActionError(null);
     try {
-      const res = await fetch(`${API_V1}/billing/subscription/cancel`, {
+      const result = await ApiClient.request<{ message?: string }>(subscription ? '/billing/subscription/cancel' : '/billing/checkout', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
+        ...(subscription ? {} : { body: JSON.stringify({ tier: 'FREE', interval: 'monthly' }) }),
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Cancellation failed');
-
-      addToast(data.message || 'Subscription scheduled to cancel at period end.', 'info');
-      setShowCancelModal(false);
-      await fetchBillingData();
-      await syncProfile();
-    } catch (err: any) {
-      addToast(err.message || 'Could not cancel subscription', 'error');
+      setShowCancel(false);
+      setNotice({ kind: 'success', text: result.message || 'Your plan change was saved by the billing service.' });
+      await Promise.all([loadHistory(), syncProfile()]);
+    } catch (error) {
+      setActionError(errorMessage(error, 'Your cancellation could not be saved. Please try again.'));
     } finally {
       setCanceling(false);
     }
   };
 
-  // Reactivate Subscription
-  const handleReactivateSubscription = async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
-
+  const reactivate = async () => {
+    if (demoMode || reactivating || !cancellationMatches || multipleActive) return;
     setReactivating(true);
+    setActionError(null);
     try {
-      const res = await fetch(`${API_V1}/billing/subscription/reactivate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Reactivation failed');
-
-      addToast(data.message || 'Subscription successfully reactivated!', 'success');
-      await fetchBillingData();
-      await syncProfile();
-    } catch (err: any) {
-      addToast(err.message || 'Could not reactivate subscription', 'error');
+      const result = await ApiClient.request<{ message?: string }>('/billing/subscription/reactivate', { method: 'POST' });
+      setNotice({ kind: 'success', text: result.message || 'Your scheduled cancellation was removed.' });
+      await Promise.all([loadHistory(), syncProfile()]);
+    } catch (error) {
+      setActionError(errorMessage(error, 'Your subscription could not be reactivated.'));
     } finally {
       setReactivating(false);
     }
   };
 
-  // Download Invoice PDF
-  const handleDownloadInvoice = async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) {
-      addToast('Please sign in to download tax invoices.', 'error');
-      return;
-    }
-
-    setDownloadingInvoice(true);
+  const downloadInvoice = async () => {
+    if (!latestPaidInvoice || downloading) return;
+    setDownloading(true);
+    setActionError(null);
     try {
-      const res = await fetch(`${API_V1}/billing/invoice/download`, {
-        headers: { Authorization: `Bearer ${authToken}` },
+      let accessToken = useAuthStore.getState().token || localStorage.getItem('doxera_token');
+      const request = () => fetch('/api/v1/billing/invoice/download', {
+        credentials: 'include', headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       });
-
-      if (!res.ok) throw new Error('Could not generate tax invoice PDF');
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Doxera_Invoice_${new Date().toISOString().slice(0, 10)}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      a.remove();
-
-      addToast('Tax invoice PDF downloaded successfully!', 'success');
-    } catch (err: any) {
-      addToast(err.message || 'Invoice download failed', 'error');
+      let response = await request();
+      if (response.status === 401) {
+        accessToken = await refreshTokens();
+        if (accessToken) response = await request();
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(typeof data?.message === 'string' ? data.message : 'The invoice could not be downloaded.');
+      }
+      if (!response.headers.get('Content-Type')?.includes('application/pdf')) throw new Error('The billing service did not return a PDF invoice.');
+      const blob = await response.blob();
+      if (await blob.slice(0, 5).text() !== '%PDF-') throw new Error('The downloaded invoice is not a valid PDF. Please try again.');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${latestPaidInvoice.invoiceNumber.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice({ kind: 'success', text: 'Your latest paid invoice was downloaded.' });
+    } catch (error) {
+      setActionError(errorMessage(error, 'Your invoice could not be downloaded.'));
     } finally {
-      setDownloadingInvoice(false);
+      setDownloading(false);
     }
   };
 
-  const currentTier = user?.plan || activeSub?.tier || 'FREE';
-  const isCanceledAtEnd = activeSub?.cancelAtPeriodEnd ?? false;
-
-  const storageUsedBytes = Number(user?.storageUsedBytes || 0);
-  const storageLimitBytes = Number(user?.storageLimitBytes || 1073741824);
-  const storageUsedMB = (storageUsedBytes / (1024 * 1024)).toFixed(0);
-  const storageLimitLabel =
-    storageLimitBytes >= 1073741824
-      ? `${(storageLimitBytes / 1073741824).toFixed(0)} GB`
-      : `${(storageLimitBytes / (1024 * 1024)).toFixed(0)} MB`;
-  const storageUsedLabel =
-    storageUsedBytes >= 1073741824
-      ? `${(storageUsedBytes / 1073741824).toFixed(2)} GB`
-      : `${storageUsedMB} MB`;
-  const storagePercent = storageLimitBytes > 0
-    ? Math.min(100, Math.round((storageUsedBytes / storageLimitBytes) * 100))
-    : 0;
-  const renewalDate = activeSub?.currentPeriodEnd
-    ? new Date(activeSub.currentPeriodEnd).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : 'Dec 01, 2026';
+  if (!isHydrated || !signedIn) {
+    return <div className="flex min-h-[65vh] items-center justify-center" role="status"><Loader2 className="h-6 w-6 animate-spin text-brand-500" /><span className="sr-only">Checking your account</span></div>;
+  }
 
   return (
-    <div className="min-h-screen bg-[#fbfbfd] dark:bg-black text-zinc-900 dark:text-zinc-100 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto space-y-10">
-        {/* Header */}
-        <div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1">
-            <CreditCard className="w-4 h-4" /> Enterprise Subscription & Billing Operations
+    <WorkspaceShell>
+    <div className="relative min-h-screen overflow-hidden bg-zinc-50 text-ink-900 dark:bg-ink-950 dark:text-white">
+      <div aria-hidden className="pointer-events-none absolute -right-48 -top-48 h-[500px] w-[500px] rounded-full bg-brand-500/[0.07] blur-[100px]" />
+      <div className="relative mx-auto max-w-7xl space-y-8">
+        <Reveal>
+          <div className="mb-6 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <Link href="/dashboard" className="focus-ring rounded-md transition-colors hover:text-brand-600 dark:hover:text-brand-300">Workspace</Link>
+            <ChevronRight className="h-3 w-3" aria-hidden />
+            <span className="text-zinc-700 dark:text-zinc-200">Billing</span>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-            Billing & Invoices
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Manage your subscription tier, monitor cluster quota usage, and download tax-compliant PDF receipts.
-          </p>
+          <div className="flex flex-wrap items-end justify-between gap-5">
+            <div>
+              <Badge tone="neutral" className="mb-4"><Wallet className="h-3 w-3" aria-hidden /> Your workspace, your plan</Badge>
+              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Billing &amp; subscription<span className="text-brand-500">.</span></h1>
+              <p className="mt-3 max-w-xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">Manage your plan, keep track of payments, and find your invoices in one place.</p>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => void loadHistory()} loading={refreshing} disabled={returnLoading}>
+              {!refreshing && <RefreshCw className="h-3.5 w-3.5" aria-hidden />} Refresh billing
+            </Button>
+          </div>
+        </Reveal>
+
+        <div aria-live="polite" className="space-y-3">
+          {notice && (
+            <div className={`flex items-start gap-3 rounded-2xl border p-4 text-sm ${notice.kind === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200' : 'border-brand-500/20 bg-brand-500/10 text-brand-800 dark:text-brand-200'}`}>
+              {notice.kind === 'success' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> : <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />}
+              <p className="flex-1 leading-relaxed">{notice.text}</p>
+              <button onClick={() => setNotice(null)} aria-label="Dismiss notification" className="focus-ring shrink-0 rounded p-0.5"><XCircle className="h-4 w-4" /></button>
+            </div>
+          )}
+          {returnLoading && <div role="status" className="flex items-center gap-3 rounded-2xl border border-brand-500/20 bg-brand-500/10 p-4 text-sm text-brand-700 dark:text-brand-200"><Loader2 className="h-4 w-4 animate-spin" />Verifying your payment with the billing service…</div>}
+          {actionError && <div role="alert" className="flex items-start gap-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-300"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><p>{actionError}</p></div>}
+          {historyError && (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-300">
+              <p className="flex items-start gap-2"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{historyError}{history ? ' Previously loaded information is shown below.' : ''}</p>
+              <Button size="sm" variant="secondary" onClick={() => void loadHistory()} loading={refreshing}>Try again</Button>
+            </div>
+          )}
         </div>
 
-        {/* Cancellation Notice Banner */}
-        {isCanceledAtEnd && (
-          <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                  Subscription Scheduled for Cancellation
-                </h4>
-                <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
-                  You will maintain full access to your <strong>{currentTier}</strong> plan privileges until{' '}
-                  <strong>{renewalDate}</strong>. No further recurring charges will occur.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={handleReactivateSubscription}
-              disabled={reactivating}
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-sm transition whitespace-nowrap"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${reactivating ? 'animate-spin' : ''}`} />
-              <span>{reactivating ? 'Reactivating...' : 'Reactivate Subscription'}</span>
-            </button>
-          </div>
-        )}
-
-        {/* Current Plan & Quota Card */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold">
-                  Current Subscription
-                </span>
-                <div className="flex items-center gap-3 mt-1">
-                  <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">
-                    {currentTier} Plan
-                  </h2>
-                  {isCanceledAtEnd ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-                      Cancels {renewalDate}
-                    </span>
-                  ) : currentTier === 'FREE' ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
-                      Free Starter
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                      Active & Good Standing
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {currentTier !== 'FREE' && !isCanceledAtEnd && (
-                  <button
-                    onClick={() => setShowCancelModal(true)}
-                    className="py-2 px-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-xs font-medium text-zinc-600 dark:text-zinc-300 transition"
-                  >
-                    Cancel Plan
-                  </button>
-                )}
-
-                <button
-                  onClick={handleDownloadInvoice}
-                  disabled={downloadingInvoice}
-                  className="inline-flex items-center gap-2 py-2 px-3.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-xs font-semibold transition"
-                >
-                  <Download className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
-                  <span>{downloadingInvoice ? 'Generating PDF...' : 'Latest Invoice'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Quota Usage Meters */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 space-y-2">
-                <div className="flex items-center justify-between text-xs text-zinc-500">
-                  <span className="flex items-center gap-1.5 font-medium">
-                    <HardDrive className="w-3.5 h-3.5" /> Storage
-                  </span>
-                  <span>
-                    {currentTier === 'ENTERPRISE'
-                      ? `${storageUsedLabel} / Unlimited`
-                      : `${storageUsedLabel} / ${storageLimitLabel}`}
-                  </span>
-                </div>
-                <div className="w-full bg-zinc-200 dark:bg-zinc-700 h-2 rounded-full overflow-hidden">
-                  <div className="bg-blue-600 h-full rounded-full" style={{ width: `${storagePercent}%` }} />
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 space-y-2">
-                <div className="flex items-center justify-between text-xs text-zinc-500">
-                  <span className="flex items-center gap-1.5 font-medium">
-                    <Zap className="w-3.5 h-3.5" /> PDF Operations
-                  </span>
-                  <span>
-                    {currentTier === 'FREE' ? '32 / 50 daily' : '412 / Unlimited'}
-                  </span>
-                </div>
-                <div className="w-full bg-zinc-200 dark:bg-zinc-700 h-2 rounded-full overflow-hidden">
-                  <div className="bg-emerald-500 h-full rounded-full" style={{ width: '15%' }} />
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 space-y-2">
-                <div className="flex items-center justify-between text-xs text-zinc-500">
-                  <span className="flex items-center gap-1.5 font-medium">
-                    <Cpu className="w-3.5 h-3.5" /> AI Studio Tokens
-                  </span>
-                  <span>
-                    {currentTier === 'ENTERPRISE'
-                      ? '420k / Dedicated'
-                      : currentTier === 'BUSINESS'
-                      ? '185k / 2.5M'
-                      : currentTier === 'PRO'
-                      ? '142k / 1.0M'
-                      : '45k / 100k'}
-                  </span>
-                </div>
-                <div className="w-full bg-zinc-200 dark:bg-zinc-700 h-2 rounded-full overflow-hidden">
-                  <div className="bg-indigo-600 h-full rounded-full" style={{ width: '14%' }} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Payment Method Card */}
-          <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-1">
-                Payment Method & Gateway
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">
-                Securely encrypted via PCI-DSS Level 1 compliant gateway.
-              </p>
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center gap-3">
-                <div className="w-10 h-7 rounded bg-blue-900 text-white flex items-center justify-center font-bold text-[10px] tracking-widest uppercase">
-                  {activeSub?.provider || 'CARD'}
-                </div>
-                <div>
-                  <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 block">
-                    {activeSub?.provider === 'paypal'
-                      ? 'PayPal Digital Wallet'
-                      : activeSub?.provider === 'razorpay'
-                      ? 'Razorpay UPI / Netbanking'
-                      : '•••• •••• •••• 4242'}
-                  </span>
-                  <span className="text-[10px] text-zinc-400">
-                    {activeSub?.provider ? 'Connected & Active' : 'Expires 12/28'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800 text-xs text-zinc-500 flex items-center justify-between">
-              <span>
-                {isCanceledAtEnd ? 'Access ends:' : 'Next billing cycle:'}{' '}
-                <strong>{renewalDate}</strong>
-              </span>
-              <span className="text-zinc-400 font-mono">
-                {currentTier === 'PRO'
-                  ? '$15.00/mo'
-                  : currentTier === 'BUSINESS'
-                  ? '$49.00/mo'
-                  : currentTier === 'ENTERPRISE'
-                  ? '$199.00/mo'
-                  : '$0.00'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Upgrade / Change Plan Cards */}
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-semibold text-zinc-900 dark:text-white">
-                Available Subscription Plans
-              </h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Upgrade, downgrade, or switch billing frequency anytime. Instant prorated credit applied automatically.
-              </p>
-            </div>
-
-            {/* Monthly / Annual Switcher */}
-            <div className="inline-flex items-center p-1 rounded-full bg-zinc-200/70 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 self-start sm:self-auto">
-              <button
-                onClick={() => setBillingCycle('monthly')}
-                className={`px-3.5 py-1 rounded-full text-xs font-semibold transition ${
-                  billingCycle === 'monthly'
-                    ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                Monthly
-              </button>
-              <button
-                onClick={() => setBillingCycle('yearly')}
-                className={`px-3.5 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 ${
-                  billingCycle === 'yearly'
-                    ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                <span>Annual</span>
-                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 px-1.5 py-0.2 rounded-full font-bold">
-                  Save 20%
-                </span>
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {plans.map((p) => {
-              const isCurrent = currentTier === p.tier;
-              const displayPrice = billingCycle === 'yearly' ? p.priceYearly : p.priceMonthly;
-
-              return (
-                <div
-                  key={p.id}
-                  className={`bg-white dark:bg-zinc-900 rounded-3xl p-6 border transition flex flex-col justify-between relative ${
-                    p.recommended
-                      ? 'border-blue-500 shadow-lg shadow-blue-500/5'
-                      : 'border-zinc-200 dark:border-zinc-800'
-                  }`}
-                >
-                  {p.recommended && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-sm">
-                      <Sparkles className="w-3 h-3" /> Most Popular
+        {loadingHistory ? <HistorySkeleton /> : history && (
+          <>
+            <Reveal delay={0.05}>
+              <div className="grid items-stretch gap-5 lg:grid-cols-[1.5fr_1fr]">
+                <Card className="relative overflow-hidden p-6 sm:p-8" gradientRing>
+                  <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-48 w-48 rounded-full bg-brand-500/10 blur-3xl" />
+                  <div className="relative">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400"><Layers3 className="h-4 w-4 text-brand-500" aria-hidden /> Current plan</span>
+                      {subscription ? <Status status={subscription.status} /> : <Badge tone="neutral">{currentPlan === 'FREE' ? 'Free workspace' : 'Account entitlement'}</Badge>}
                     </div>
-                  )}
-
-                  <div>
-                    <h3 className="text-base font-semibold text-zinc-900 dark:text-white">{p.name}</h3>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 min-h-[32px]">{p.description}</p>
-
-                    <div className="mt-4 mb-6">
-                      <span className="text-3xl font-bold text-zinc-900 dark:text-white">${displayPrice}</span>
-                      <span className="text-xs text-zinc-400"> / month</span>
-                      {billingCycle === 'yearly' && displayPrice > 0 && (
-                        <span className="block text-[11px] text-zinc-400 mt-0.5">
-                          Billed annually (${displayPrice * 12}/yr)
-                        </span>
-                      )}
+                    <div className="mt-7 flex flex-wrap items-end gap-x-3 gap-y-2">
+                      <h2 className="text-4xl font-bold tracking-tight sm:text-5xl">{currentPlan}</h2>
+                      {plan && <span className="pb-1 text-sm text-zinc-500 dark:text-zinc-400">{plan.name}</span>}
                     </div>
-
-                    <ul className="space-y-2.5 text-xs text-zinc-600 dark:text-zinc-300">
-                      {p.features.map((feat, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                          <span>{feat}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="mt-8 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                    <button
-                      onClick={() => handleOpenCheckoutModal(p)}
-                      disabled={isCurrent}
-                      className={`w-full py-2.5 px-4 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 ${
-                        isCurrent
-                          ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-default'
-                          : p.recommended
-                          ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
-                          : 'bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 text-white'
-                      }`}
-                    >
-                      {isCurrent ? (
-                        'Current Plan'
-                      ) : (
-                        <>
-                          <span>Select {p.name}</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Multi-Gateway Checkout Modal */}
-        {selectedPlanForCheckout && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-zinc-900 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in zoom-in-95">
-              <div className="flex items-center justify-between pb-4 border-b border-zinc-100 dark:border-zinc-800">
-                <div>
-                  <h3 className="font-bold text-zinc-900 dark:text-white text-base">
-                    Upgrade to {selectedPlanForCheckout.name} Tier
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    {billingCycle === 'yearly' ? 'Annual Subscription (20% savings)' : 'Monthly Recurring Billing'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setSelectedPlanForCheckout(null)}
-                  className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Gateway Selector */}
-              <div className="mt-5 space-y-4">
-                <label className="block text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                  Select Payment Gateway
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {enabledProviders.stripe && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProvider('stripe')}
-                      className={`p-3 rounded-2xl border text-center transition ${
-                        selectedProvider === 'stripe'
-                          ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200 font-semibold'
-                          : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-                      }`}
-                    >
-                      <CreditCard className="w-5 h-5 mx-auto mb-1 text-blue-600" />
-                      <div className="text-xs font-bold">Stripe</div>
-                      <div className="text-[10px] text-zinc-400">Cards & Apple Pay</div>
-                    </button>
-                  )}
-
-                  {enabledProviders.razorpay && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProvider('razorpay')}
-                      className={`p-3 rounded-2xl border text-center transition ${
-                        selectedProvider === 'razorpay'
-                          ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200 font-semibold'
-                          : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-                      }`}
-                    >
-                      <Zap className="w-5 h-5 mx-auto mb-1 text-emerald-600" />
-                      <div className="text-xs font-bold">Razorpay</div>
-                      <div className="text-[10px] text-zinc-400">UPI, Netbanking</div>
-                    </button>
-                  )}
-
-                  {enabledProviders.paypal && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProvider('paypal')}
-                      className={`p-3 rounded-2xl border text-center transition ${
-                        selectedProvider === 'paypal'
-                          ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200 font-semibold'
-                          : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-                      }`}
-                    >
-                      <Building className="w-5 h-5 mx-auto mb-1 text-indigo-600" />
-                      <div className="text-xs font-bold">PayPal</div>
-                      <div className="text-[10px] text-zinc-400">Instant Wallet</div>
-                    </button>
-                  )}
-                </div>
-
-                {/* Promo Code Input */}
-                <div className="pt-2">
-                  <label className="block text-xs font-semibold text-zinc-800 dark:text-zinc-200 mb-1">
-                    Promotional Coupon
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="e.g. WELCOME50 or PRO2026"
-                      value={couponCode}
-                      onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                      className="text-xs px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white flex-1 focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleApplyCoupon}
-                      disabled={couponLoading || !couponCode.trim()}
-                      className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-white text-xs font-semibold disabled:opacity-50 transition"
-                    >
-                      {couponLoading ? 'Checking...' : 'Apply'}
-                    </button>
-                  </div>
-
-                  {couponData && (
-                    <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 p-2.5 rounded-xl flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 font-medium">
-                        <Check className="w-4 h-4" /> Coupon {couponData.code} applied!
-                      </span>
-                      <span className="font-bold">
-                        ${couponData.finalAmount} (was ${couponData.originalAmount})
-                      </span>
+                    <p className="mt-3 max-w-md text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+                      {subscription
+                        ? cancelScheduled ? `Your paid access continues through ${formatDate(subscription.currentPeriodEnd)}. A move to Free is scheduled.`
+                          : recurring ? 'Your recurring subscription is managed through Stripe.'
+                            : 'A prepaid plan period. Payments are not collected automatically.'
+                        : currentPlan === 'FREE' ? 'A little document magic, whenever you need it. Explore a paid plan when your work needs more room.'
+                          : 'This account has plan access without a current paid period to display.'}
+                    </p>
+                    <div className="mt-7 grid grid-cols-2 gap-4 border-t border-black/[0.07] pt-5 dark:border-white/[0.08]">
+                      <div>
+                        <p className="mb-1.5 flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400"><CalendarDays className="h-3.5 w-3.5" aria-hidden />{recurring && !cancelScheduled ? 'Current period ends' : 'Paid through'}</p>
+                        <p className="text-sm font-semibold">{subscription ? formatDate(subscription.currentPeriodEnd) : 'No paid period'}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1.5 text-xs text-zinc-500 dark:text-zinc-400">Payment schedule</p>
+                        <p className="text-sm font-semibold">{subscription ? `${subscription.interval === 'yearly' ? 'Yearly' : 'Monthly'} · ${recurring ? 'Recurring' : 'Prepaid'}` : 'No scheduled payments'}</p>
+                      </div>
                     </div>
-                  )}
-                </div>
-
-                {/* Summary & Checkout Action */}
-                <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                  <div>
-                    <div className="text-[10px] text-zinc-400 uppercase font-semibold">Total Due Today</div>
-                    <div className="text-2xl font-extrabold text-zinc-900 dark:text-white">
-                      $
-                      {couponData
-                        ? couponData.finalAmount
-                        : billingCycle === 'yearly'
-                        ? selectedPlanForCheckout.priceYearly * 12
-                        : selectedPlanForCheckout.priceMonthly}
-                      <span className="text-xs text-zinc-500 font-normal">
-                        {' '}
-                        / {billingCycle === 'yearly' ? 'yr' : 'mo'}
-                      </span>
+                    <div className="mt-7 flex flex-wrap items-center gap-3">
+                      <Button href="#plans" size="sm">Explore plans <ArrowRight className="h-3.5 w-3.5" aria-hidden /></Button>
+                      {cancelScheduled ? <Button variant="secondary" size="sm" onClick={() => void reactivate()} loading={reactivating} disabled={demoMode || !cancellationMatches || multipleActive}>Keep this plan</Button>
+                        : (canCancel || (currentPlan !== 'FREE' && !subscription)) && <Button variant="ghost" size="sm" onClick={() => { setActionError(null); setShowCancel(true); }} disabled={demoMode || !cancellationMatches || multipleActive}>Move to Free</Button>}
                     </div>
                   </div>
+                </Card>
+                <Card className="flex flex-col p-6 sm:p-8">
+                  <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-2xl border border-brand-500/20 bg-brand-500/10 text-brand-600 dark:text-brand-300"><CreditCard className="h-5 w-5" aria-hidden /></div>
+                  <h2 className="text-lg font-semibold">Payment details</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">{paymentProvider ? `Your current paid period was purchased through ${paymentProvider}.` : 'Payment details will appear here when you purchase a paid plan.'}</p>
+                  <dl className="my-6 space-y-4 text-sm">
+                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500 dark:text-zinc-400">Account</dt><dd className="max-w-[65%] break-all text-right font-medium">{user?.email || 'Your signed-in account'}</dd></div>
+                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500 dark:text-zinc-400">Recent transactions</dt><dd className="font-semibold tabular-nums">{history.payments.length}</dd></div>
+                    <div className="flex items-center justify-between gap-3"><dt className="text-zinc-500 dark:text-zinc-400">Available invoices</dt><dd className="font-semibold tabular-nums">{history.invoices.length}</dd></div>
+                  </dl>
+                  <div className="mt-auto flex items-start gap-2.5 rounded-xl bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-500 dark:bg-white/[0.04] dark:text-zinc-400"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-500" aria-hidden />Payment status and subscription access are confirmed by the billing service.</div>
+                </Card>
+              </div>
+            </Reveal>
 
-                  <button
-                    onClick={handleExecuteCheckout}
-                    disabled={checkoutLoading}
-                    className="px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition flex items-center gap-2 disabled:opacity-50"
-                  >
-                    <span>{checkoutLoading ? 'Redirecting...' : 'Proceed to Checkout'}</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+            {(multipleActive || !cancellationMatches) && <div className="flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm leading-relaxed text-amber-800 dark:text-amber-200"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /><p>This account has multiple active paid periods. Cancellation and reactivation need a subscription review before changes can be made here.</p></div>}
+
+            {plan && (
+              <Reveal delay={0.1}>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {[
+                    { label: 'Upload size per file', value: `${plan.limits.maxFileSizeMb.toLocaleString()} MB`, icon: FileText },
+                    { label: 'Documents per batch', value: plan.limits.batchLimit.toLocaleString(), icon: Layers3 },
+                    { label: 'AI queries per month', value: plan.limits.aiQueries === -1 ? 'Unlimited' : plan.limits.aiQueries.toLocaleString(), icon: Sparkles },
+                  ].map((item) => <Card key={item.label} className="flex items-center gap-4 p-5"><item.icon className="h-5 w-5 shrink-0 text-brand-500 dark:text-brand-300" aria-hidden /><div><p className="text-xs text-zinc-500 dark:text-zinc-400">{item.label}</p><p className="mt-1 text-lg font-semibold tabular-nums">{item.value}</p></div></Card>)}
                 </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Cancellation Confirmation Modal */}
-        {showCancelModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-zinc-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in zoom-in-95 space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 flex items-center justify-center text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-
-              <div>
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">
-                  Cancel {currentTier} Subscription?
-                </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                  You will maintain all <strong>{currentTier}</strong> perks, OCR queues, and unlimited conversion capacity until{' '}
-                  <strong>{renewalDate}</strong>. At that point, your account will safely revert to the Starter Community plan.
-                </p>
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowCancelModal(false)}
-                  className="px-4 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition"
-                >
-                  Keep Subscription
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCancelSubscription}
-                  disabled={canceling}
-                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-sm transition disabled:opacity-50"
-                >
-                  {canceling ? 'Scheduling Cancel...' : 'Confirm Cancellation'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Invoice History Section */}
-        <div className="bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="text-base font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-blue-600" /> Tax Invoices & Payment Ledger
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                All receipts comply with international VAT, IRS Form 1099, and digital e-invoicing standards.
-              </p>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            {invoices.length === 0 ? (
-              <div className="text-center py-10 space-y-2">
-                <Receipt className="w-8 h-8 text-zinc-300 dark:text-zinc-600 mx-auto" />
-                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                  No payment invoices found yet.
-                </p>
-                <p className="text-[11px] text-zinc-400">
-                  When your plan renews or you upgrade, generated tax receipts will appear here automatically.
-                </p>
-              </div>
-            ) : (
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-zinc-200 dark:border-zinc-800 text-zinc-400 uppercase tracking-wider font-semibold">
-                    <th className="py-3 px-4">Invoice Reference</th>
-                    <th className="py-3 px-4">Billing Date</th>
-                    <th className="py-3 px-4">Amount</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-right">PDF Download</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
-                  {invoices.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
-                      <td className="py-3 px-4 font-mono font-medium text-zinc-900 dark:text-zinc-100">
-                        {inv.invoiceNumber}
-                      </td>
-                      <td className="py-3 px-4 text-zinc-500">
-                        {new Date(inv.createdAt).toLocaleDateString('en-US', {
-                          month: 'long',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
-                      </td>
-                      <td className="py-3 px-4 font-semibold text-zinc-800 dark:text-zinc-200">
-                        ${inv.amount.toFixed(2)} {inv.currency}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                          {inv.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <button
-                          onClick={handleDownloadInvoice}
-                          className="p-1.5 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition"
-                          title="Download PDF"
-                        >
-                          <Download className="w-4 h-4 inline" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              </Reveal>
             )}
-          </div>
-        </div>
+
+            <Reveal>
+              <Card className="overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-black/[0.07] p-6 dark:border-white/[0.08] sm:px-8">
+                  <div><h2 className="flex items-center gap-2 text-lg font-semibold"><Receipt className="h-4 w-4 text-brand-500" aria-hidden />Payment history</h2><p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Your latest transactions and their recorded payment status.</p></div>
+                  <Badge tone="neutral">{history.payments.length} recent</Badge>
+                </div>
+                {history.payments.length === 0 ? (
+                  <div className="flex flex-col items-center px-6 py-14 text-center"><div className="mb-4 rounded-2xl bg-zinc-100 p-4 text-zinc-400 dark:bg-white/[0.05]"><Receipt className="h-7 w-7" aria-hidden /></div><h3 className="text-sm font-semibold">No payments yet</h3><p className="mt-2 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">When you purchase a plan, your transactions will appear here.</p></div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[540px] text-left text-sm">
+                      <caption className="sr-only">Recent payments from your billing history</caption>
+                      <thead className="bg-zinc-50 text-[11px] uppercase tracking-wider text-zinc-500 dark:bg-white/[0.025] dark:text-zinc-400"><tr><th scope="col" className="px-6 py-4 font-medium sm:pl-8">Date</th><th scope="col" className="px-4 py-4 font-medium">Provider</th><th scope="col" className="px-4 py-4 font-medium">Status</th><th scope="col" className="px-6 py-4 text-right font-medium sm:pr-8">Amount</th></tr></thead>
+                      <tbody className="divide-y divide-black/[0.05] dark:divide-white/[0.06]">{history.payments.map((payment) => <tr key={payment.id} className="transition-colors hover:bg-zinc-50/80 dark:hover:bg-white/[0.02]"><td className="px-6 py-5 text-zinc-600 dark:text-zinc-300 sm:pl-8">{formatDate(payment.createdAt)}</td><td className="px-4 py-5 font-medium capitalize">{payment.provider}</td><td className="px-4 py-5"><Status status={payment.status} /></td><td className="px-6 py-5 text-right font-semibold tabular-nums sm:pr-8">{formatMoney(payment.amount, payment.currency)}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                )}
+              </Card>
+            </Reveal>
+
+            <Reveal>
+              <Card className="overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-black/[0.07] p-6 dark:border-white/[0.08] sm:px-8">
+                  <div><h2 className="flex items-center gap-2 text-lg font-semibold"><FileText className="h-4 w-4 text-brand-500" aria-hidden />Invoices</h2><p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">Invoice records from your account. PDF download is available for the latest paid invoice.</p></div>
+                  {latestPaidInvoice && <Button size="sm" variant="secondary" onClick={() => void downloadInvoice()} loading={downloading}><Download className="h-3.5 w-3.5" aria-hidden /> Download latest paid invoice</Button>}
+                </div>
+                {history.invoices.length === 0 ? (
+                  <div className="px-6 py-12 text-center"><FileText className="mx-auto mb-4 h-7 w-7 text-zinc-400" aria-hidden /><h3 className="text-sm font-semibold">Your invoices will live here</h3><p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">No invoices have been recorded for this account.</p></div>
+                ) : (
+                  <ul className="divide-y divide-black/[0.05] dark:divide-white/[0.06]">{history.invoices.map((invoice) => <li key={invoice.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-6 py-5 sm:px-8"><div className="flex min-w-0 flex-1 items-start gap-3"><div className="hidden shrink-0 rounded-xl bg-zinc-100 p-2.5 text-zinc-500 dark:bg-white/[0.05] sm:block"><FileText className="h-4 w-4" aria-hidden /></div><div className="min-w-0"><p className="break-all text-xs font-semibold">{invoice.invoiceNumber}</p><p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">{formatDate(invoice.createdAt)}</p></div></div><div className="flex items-center gap-4"><Status status={invoice.status} /><span className="min-w-[85px] text-right text-sm font-semibold tabular-nums">{formatMoney(invoice.amount, invoice.currency)}</span></div></li>)}</ul>
+                )}
+              </Card>
+            </Reveal>
+          </>
+        )}
+
+        <section id="plans" className="scroll-mt-24 space-y-7 pb-8 pt-8">
+          <Reveal><div className="flex flex-wrap items-end justify-between gap-5"><div><Badge className="mb-3"><Sparkles className="h-3 w-3" aria-hidden /> Room for what’s next</Badge><h2 className="text-2xl font-bold tracking-tight sm:text-3xl">A plan for your next chapter.</h2><p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Compare the current plans and choose what fits your work.</p></div><BillingToggle value={interval} onChange={setInterval} /></div></Reveal>
+          {catalog.error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-5 text-sm text-rose-700 dark:text-rose-300"><p>{catalog.error}</p><Button size="sm" variant="secondary" onClick={catalog.reload}>Reload plans</Button></div>
+            : catalog.loading ? <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4" role="status" aria-label="Loading plans">{[0, 1, 2, 3].map((index) => <Card key={index} className="h-80 p-6"><div className="skeleton h-5 w-24 rounded" /><div className="skeleton mt-6 h-12 w-32 rounded-lg" /><div className="skeleton mt-8 h-28 rounded-xl" /></Card>)}</div>
+              : <PlanCards plans={catalog.plans} providers={catalog.providers} interval={interval} currentPlan={currentPlan} onSelect={choosePlan} />}
+          <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">Paid plan changes create a separate paid period. Existing payments are not prorated and existing recurring subscriptions are not automatically replaced. To move to Free, use the plan controls above. Lower paid plan changes are not currently available.</p>
+          {demoMode && <p className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-200">Payment and subscription changes are disabled in this shared demo.</p>}
+          <Link href="/pricing#compare" className="focus-ring inline-flex items-center gap-1.5 rounded-lg text-sm font-medium text-brand-600 hover:text-brand-500 dark:text-brand-300">See the full plan comparison <ArrowUpRight className="h-4 w-4" aria-hidden /></Link>
+        </section>
+
+        <div className="border-t border-black/[0.07] py-5 dark:border-white/[0.08]"><Link href="/dashboard" className="focus-ring inline-flex items-center gap-2 rounded-md text-sm text-zinc-500 transition-colors hover:text-ink-900 dark:text-zinc-400 dark:hover:text-white"><ArrowLeft className="h-4 w-4" aria-hidden /> Back to your workspace</Link></div>
       </div>
+
+      <CheckoutModal plan={selectedPlan} interval={interval} providers={catalog.providers} onClose={() => setSelectedPlan(null)} onVerified={afterVerified} />
+      <Modal isOpen={showCancel} busy={canceling} onClose={() => { if (!canceling) setShowCancel(false); }} title="Move to the Free plan?" description={subscription ? 'Review what happens to your current paid period.' : 'Confirm this change to your account entitlement.'}>
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm leading-relaxed text-amber-800 dark:text-amber-200">
+            {subscription ? <>Your current paid access continues through <strong>{formatDate(subscription.currentPeriodEnd)}</strong>. This schedules a cancellation at the end of that period.</> : <>Your account will move to Free when the billing service confirms the change.</>}
+          </div>
+          <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">The Free plan has lower processing and upload limits. Review the plan comparison before making this change.</p>
+          {actionError && <p role="alert" className="text-sm text-rose-600 dark:text-rose-300">{actionError}</p>}
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button variant="secondary" onClick={() => setShowCancel(false)} disabled={canceling}>Keep my plan</Button><Button variant="danger" onClick={() => void cancelSubscription()} loading={canceling} disabled={demoMode || !cancellationMatches || multipleActive}>Confirm move to Free</Button></div>
+        </div>
+      </Modal>
     </div>
+    </WorkspaceShell>
   );
 }

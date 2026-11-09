@@ -3,7 +3,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useAuthStore } from '@/lib/auth-store';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { Button } from '@/components/ui/Button';
+import { cn } from '@/lib/cn';
 import {
   FileCheck2,
   ChevronDown,
@@ -12,49 +16,67 @@ import {
   CreditCard,
   Settings,
   LogOut,
-  Bell,
   Menu,
   X,
-  CheckCircle2,
-  AlertCircle,
-  ExternalLink,
 } from 'lucide-react';
+
+const UNAUTH_LINKS = [
+  { label: 'Home', href: '/' },
+  { label: 'Tools', href: '/#tools' },
+  { label: 'Pricing', href: '/pricing' },
+];
+
+const AUTH_LINKS = [
+  { label: 'Home', href: '/' },
+  { label: 'Tools', href: '/#tools' },
+  { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Billing', href: '/billing' },
+];
+
+const ACCOUNT_MENU = [
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Account', href: '/account', icon: User },
+  { label: 'Billing', href: '/billing', icon: CreditCard },
+  { label: 'Settings', href: '/settings', icon: Settings },
+];
 
 export const Navbar = () => {
   const pathname = usePathname();
   const router = useRouter();
+  const reduce = useReducedMotion();
   const { user, isAuthenticated, logout, syncProfile } = useAuthStore();
+
   const [mounted, setMounted] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(2);
-
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMounted(true);
     syncProfile();
+    // syncProfile is a stable store action, so this still runs once on mount.
+  }, [syncProfile]);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Close dropdowns on outside click or Escape
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setUserDropdownOpen(false);
       }
-      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
-        setNotificationsOpen(false);
-      }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setUserDropdownOpen(false);
-        setNotificationsOpen(false);
+        setMobileMenuOpen(false);
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
@@ -63,12 +85,18 @@ export const Navbar = () => {
     };
   }, []);
 
-  // Close menus on route change
   useEffect(() => {
     setUserDropdownOpen(false);
-    setNotificationsOpen(false);
     setMobileMenuOpen(false);
   }, [pathname]);
+
+  // Prevent background scroll while the mobile drawer is open.
+  useEffect(() => {
+    document.body.style.overflow = mobileMenuOpen ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileMenuOpen]);
 
   const handleLogout = async () => {
     setUserDropdownOpen(false);
@@ -77,375 +105,239 @@ export const Navbar = () => {
     router.push('/');
   };
 
-  const isUserLoggedIn = mounted && isAuthenticated && user;
-
-  // Header navigation items strictly per specification
-  const unauthNavLinks = [
-    { label: 'Home', href: '/' },
-    { label: 'Tools', href: '/#tools' },
-    { label: 'Pricing', href: '/pricing' },
-  ];
-
-  const authNavLinks = [
-    { label: 'Home', href: '/' },
-    { label: 'Tools', href: '/#tools' },
-    { label: 'Dashboard', href: '/dashboard' },
-    { label: 'Billing', href: '/billing' },
-  ];
-
-  const currentNavLinks = isUserLoggedIn ? authNavLinks : unauthNavLinks;
-
-  const getPlanBadgeClass = (plan?: string) => {
-    switch (plan) {
-      case 'ENTERPRISE':
-        return 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/50 dark:text-purple-300 dark:border-purple-800';
-      case 'BUSINESS':
-        return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-800';
-      case 'PRO':
-        return 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800';
-      default:
-        return 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700';
-    }
+  const loggedIn = mounted && isAuthenticated && user;
+  const links = loggedIn ? AUTH_LINKS : UNAUTH_LINKS;
+  // Hash links (e.g. "/#tools") point at a section of another page, never a route of their own.
+  const isActive = (href: string) => {
+    if (href.includes('#')) return false;
+    return href === '/' ? pathname === '/' : pathname.startsWith(href);
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-black/[0.06] dark:border-white/[0.08] bg-white/80 dark:bg-black/80 backdrop-blur-xl transition-all">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* Brand Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform duration-200">
-            <FileCheck2 className="w-5 h-5" />
-          </div>
-          <div className="flex flex-col">
-            <span className="font-semibold text-lg tracking-tight text-zinc-900 dark:text-white flex items-center gap-1.5">
-              Doxera
+    <>
+      <header
+        className={cn(
+          'sticky top-0 z-50 w-full transition-all duration-300',
+          scrolled
+            ? 'border-b border-black/[0.07] bg-white/80 backdrop-blur-xl dark:border-white/[0.07] dark:bg-ink-950/80'
+            : 'border-b border-transparent bg-transparent',
+        )}
+      >
+        <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+          {/* Brand */}
+          <Link href="/" className="focus-ring group flex shrink-0 items-center gap-2.5 rounded-lg">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white shadow-glow transition-transform duration-200 group-hover:scale-105">
+              <FileCheck2 className="h-4 w-4" aria-hidden />
             </span>
-          </div>
-        </Link>
+            <span className="text-lg font-semibold tracking-tight text-ink-900 dark:text-white">Doxera</span>
+          </Link>
 
-        {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-1">
-          {currentNavLinks.map((link) => {
-            const isActive = pathname === link.href;
-            return (
+          {/* Desktop nav */}
+          <div className="hidden items-center gap-1 md:flex">
+            {links.map((link) => (
               <Link
-                key={link.label}
+                key={link.href}
                 href={link.href}
-                className={`px-3.5 py-1.5 text-sm font-medium rounded-full transition-all duration-150 flex items-center gap-1.5 ${
-                  isActive
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/60'
-                }`}
-              >
-                {link.label}
-              </Link>
-            );
-          })}
-
-          {/* When logged in: Notifications link in nav */}
-          {isUserLoggedIn && (
-            <div className="relative" ref={notifRef}>
-              <button
-                type="button"
-                onClick={() => setNotificationsOpen(!notificationsOpen)}
-                className={`px-3.5 py-1.5 text-sm font-medium rounded-full transition-all duration-150 flex items-center gap-1.5 ${
-                  notificationsOpen
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/60'
-                }`}
-              >
-                <Bell className="w-4 h-4" />
-                <span>Notifications</span>
-                {unreadCount > 0 && (
-                  <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                className={cn(
+                  'focus-ring relative rounded-full px-3.5 py-2 text-sm font-medium transition-colors duration-200',
+                  isActive(link.href)
+                    ? 'text-ink-900 dark:text-white'
+                    : 'text-ink-600 hover:text-ink-900 dark:text-zinc-400 dark:hover:text-white',
                 )}
-              </button>
-
-              {/* Notifications Popover */}
-              {notificationsOpen && (
-                <div className="absolute left-0 mt-2 w-80 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl py-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                  <div className="px-4 pb-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                      Notifications
-                    </span>
-                    {unreadCount > 0 && (
-                      <button
-                        onClick={() => setUnreadCount(0)}
-                        className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        Mark all as read
-                      </button>
-                    )}
-                  </div>
-                  <div className="divide-y divide-zinc-100 dark:divide-zinc-800 text-xs">
-                    <div className="p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition">
-                      <div className="flex items-center gap-1.5 font-medium text-zinc-900 dark:text-white">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Account Initialized</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">
-                        Your enterprise document intelligence workspace is ready.
-                      </p>
-                    </div>
-                    <div className="p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition">
-                      <div className="flex items-center gap-1.5 font-medium text-zinc-900 dark:text-white">
-                        <FileCheck2 className="w-3.5 h-3.5 text-blue-600" />
-                        <span>24+ PDF Tools Online</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">
-                        OCR, Compression, and AI Conversion pipelines active.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="px-4 pt-2 border-t border-zinc-100 dark:border-zinc-800 text-center">
-                    <Link
-                      href="/settings"
-                      className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-                    >
-                      Notification Preferences in Settings
-                    </Link>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </nav>
-
-        {/* Desktop Header Actions */}
-        <div className="hidden md:flex items-center gap-3">
-          {isUserLoggedIn ? (
-            /* Logged in: User Avatar & Dropdown */
-            <div className="relative" ref={dropdownRef}>
-              <button
-                type="button"
-                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                aria-expanded={userDropdownOpen}
-                aria-haspopup="true"
-                aria-label="User account menu"
               >
-                {/* User Avatar */}
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white text-xs flex items-center justify-center font-bold overflow-hidden shadow-inner shrink-0">
-                  {user.avatarUrl ? (
-                    <img src={user.avatarUrl} alt={user.name || 'User'} className="w-full h-full object-cover" />
-                  ) : (
-                    <span>{(user.name?.[0] || user.email?.[0] || 'U').toUpperCase()}</span>
-                  )}
-                </div>
-
-                {/* User Name & Plan */}
-                <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200 max-w-[120px] truncate">
-                  {user.name || user.email.split('@')[0]}
-                </span>
-                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${getPlanBadgeClass(user.plan)}`}>
-                  {user.plan || 'FREE'}
-                </span>
-                <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 ${userDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {/* User Avatar Dropdown strictly per specification:
-                  - My Account
-                  - Dashboard
-                  - Billing
-                  - Settings
-                  - Logout
-              */}
-              {userDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                  {/* Account Header */}
-                  <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800/80">
-                    <p className="text-xs font-semibold text-zinc-900 dark:text-white truncate">
-                      {user.name || 'Account'}
-                    </p>
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-                      {user.email}
-                    </p>
-                    <div className="mt-2 flex items-center justify-between">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getPlanBadgeClass(user.plan)}`}>
-                        {user.plan || 'FREE'} PLAN
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Menu Items */}
-                  <div className="py-1 text-xs text-zinc-700 dark:text-zinc-300">
-                    <Link
-                      href="/account"
-                      className="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
-                    >
-                      <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                      <span>My Account</span>
-                    </Link>
-
-                    <Link
-                      href="/dashboard"
-                      className="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
-                    >
-                      <LayoutDashboard className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                      <span>Dashboard</span>
-                    </Link>
-
-                    <Link
-                      href="/billing"
-                      className="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
-                    >
-                      <CreditCard className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      <span>Billing</span>
-                    </Link>
-
-                    <Link
-                      href="/settings"
-                      className="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
-                    >
-                      <Settings className="w-4 h-4 text-zinc-600 dark:text-zinc-400" />
-                      <span>Settings</span>
-                    </Link>
-                  </div>
-
-                  {/* Logout Button */}
-                  <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800/80">
-                    <button
-                      type="button"
-                      onClick={handleLogout}
-                      className="w-full text-left flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      <span>Logout</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* When NOT logged in: Login and Sign Up permanently visible */
-            <div className="flex items-center gap-3">
-              <Link
-                href="/login"
-                className="text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white px-3.5 py-1.5 rounded-full transition-colors"
-              >
-                Login
-              </Link>
-              <Link
-                href="/signup"
-                className="text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-full shadow-sm transition-all hover:shadow"
-              >
-                Sign Up
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* Mobile Hamburger Button */}
-        <div className="md:hidden flex items-center">
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white focus:outline-none"
-            aria-label="Toggle mobile menu"
-          >
-            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile Menu Drawer */}
-      {mobileMenuOpen && (
-        <div className="md:hidden border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black px-4 pt-2 pb-6 space-y-3">
-          {isUserLoggedIn && (
-            <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
-                {user.avatarUrl ? (
-                  <img src={user.avatarUrl} alt={user.name || 'User'} className="w-full h-full object-cover rounded-full" />
-                ) : (
-                  <span>{(user.name?.[0] || user.email?.[0] || 'U').toUpperCase()}</span>
+                {isActive(link.href) && (
+                  <motion.span
+                    layoutId="nav-active"
+                    className="absolute inset-0 -z-10 rounded-full bg-black/[0.05] dark:bg-white/[0.08]"
+                    transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                  />
                 )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
-                  {user.name || 'User'}
-                </div>
-                <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                  {user.email}
-                </div>
-              </div>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getPlanBadgeClass(user.plan)}`}>
-                {user.plan || 'FREE'}
-              </span>
-            </div>
-          )}
-
-          {/* Nav links */}
-          <div className="space-y-1">
-            {currentNavLinks.map((link) => (
-              <Link
-                key={link.label}
-                href={link.href}
-                onClick={() => setMobileMenuOpen(false)}
-                className="block px-3 py-2 text-base font-medium text-zinc-800 dark:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
                 {link.label}
               </Link>
             ))}
           </div>
 
-          {isUserLoggedIn ? (
-            <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 space-y-1 text-sm font-medium">
-              <Link
-                href="/account"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-2 px-3 py-2 text-zinc-700 dark:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                <User className="w-4 h-4 text-blue-600" /> My Account
-              </Link>
-              <Link
-                href="/dashboard"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-2 px-3 py-2 text-zinc-700 dark:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                <LayoutDashboard className="w-4 h-4 text-indigo-600" /> Dashboard
-              </Link>
-              <Link
-                href="/billing"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-2 px-3 py-2 text-zinc-700 dark:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                <CreditCard className="w-4 h-4 text-emerald-600" /> Billing
-              </Link>
-              <Link
-                href="/settings"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-2 px-3 py-2 text-zinc-700 dark:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                <Settings className="w-4 h-4 text-zinc-600" /> Settings
-              </Link>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="w-full text-left flex items-center gap-2 px-3 py-2 text-rose-600 dark:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
-              >
-                <LogOut className="w-4 h-4" /> Logout
-              </button>
-            </div>
-          ) : (
-            <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
-              <Link
-                href="/login"
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full text-center py-2 px-4 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 font-medium text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
-              >
-                Login
-              </Link>
-              <Link
-                href="/signup"
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full text-center py-2 px-4 rounded-xl bg-blue-600 text-white font-medium text-sm hover:bg-blue-700"
-              >
-                Sign Up
-              </Link>
-            </div>
-          )}
-        </div>
-      )}
-    </header>
+          {/* Right cluster */}
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+
+            {!mounted ? (
+              <div className="h-9 w-24 rounded-full skeleton" aria-hidden />
+            ) : loggedIn ? (
+              <div className="relative hidden md:block" ref={dropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setUserDropdownOpen((v) => !v)}
+                  aria-expanded={userDropdownOpen}
+                  aria-haspopup="menu"
+                  className="focus-ring flex items-center gap-2 rounded-full border border-black/10 py-1.5 pl-1.5 pr-3 transition-colors hover:bg-black/[0.04] dark:border-white/10 dark:hover:bg-white/[0.06]"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">
+                    {(user.name || user.email || '?').charAt(0).toUpperCase()}
+                  </span>
+                  <span className="max-w-[9rem] truncate text-sm font-medium text-ink-800 dark:text-zinc-200">
+                    {user.name || user.email}
+                  </span>
+                  <ChevronDown
+                    className={cn('h-4 w-4 text-ink-400 transition-transform duration-200', userDropdownOpen && 'rotate-180')}
+                    aria-hidden
+                  />
+                </button>
+
+                <AnimatePresence>
+                  {userDropdownOpen && (
+                    <motion.div
+                      role="menu"
+                      initial={{ opacity: 0, y: reduce ? 0 : -6, scale: reduce ? 1 : 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: reduce ? 0 : -6, scale: reduce ? 1 : 0.97 }}
+                      transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                      className="glass-panel absolute right-0 mt-2 w-60 overflow-hidden rounded-2xl p-1.5 shadow-card dark:shadow-card-dark"
+                    >
+                      <div className="border-b border-black/5 px-3 py-2.5 dark:border-white/5">
+                        <p className="truncate text-sm font-semibold text-ink-900 dark:text-white">
+                          {user.name || 'Account'}
+                        </p>
+                        <p className="truncate text-xs text-ink-500 dark:text-zinc-400">{user.email}</p>
+                      </div>
+                      <div className="py-1">
+                        {ACCOUNT_MENU.map(({ label, href, icon: Icon }) => (
+                          <Link
+                            key={href}
+                            href={href}
+                            role="menuitem"
+                            className="focus-ring flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink-700 transition-colors hover:bg-black/[0.05] dark:text-zinc-300 dark:hover:bg-white/[0.07]"
+                          >
+                            <Icon className="h-4 w-4 text-ink-400" aria-hidden />
+                            {label}
+                          </Link>
+                        ))}
+                      </div>
+                      <div className="border-t border-black/5 pt-1 dark:border-white/5">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={handleLogout}
+                          className="focus-ring flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-rose-600 transition-colors hover:bg-rose-500/10 dark:text-rose-400"
+                        >
+                          <LogOut className="h-4 w-4" aria-hidden />
+                          Sign out
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <div className="hidden items-center gap-2 md:flex">
+                <Button href="/login" variant="ghost" size="sm">
+                  Sign in
+                </Button>
+                <Button href="/signup" size="sm">
+                  Get started
+                </Button>
+              </div>
+            )}
+
+            {/* Mobile trigger */}
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open menu"
+              aria-expanded={mobileMenuOpen}
+              className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-700 hover:bg-black/[0.05] dark:text-zinc-300 dark:hover:bg-white/[0.08] md:hidden"
+            >
+              <Menu className="h-5 w-5" aria-hidden />
+            </button>
+          </div>
+        </nav>
+      </header>
+
+      {/* Mobile drawer */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 z-[60] md:hidden">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setMobileMenuOpen(false)}
+              className="absolute inset-0 bg-ink-950/50 backdrop-blur-sm"
+            />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Menu"
+              initial={{ x: reduce ? 0 : '100%', opacity: reduce ? 0 : 1 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: reduce ? 0 : '100%', opacity: reduce ? 0 : 1 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 34 }}
+              className="absolute right-0 top-0 flex h-full w-[84%] max-w-sm flex-col bg-[var(--background)] shadow-2xl"
+            >
+              <div className="flex h-16 items-center justify-between border-b border-black/[0.07] px-5 dark:border-white/[0.07]">
+                <span className="text-base font-semibold text-ink-900 dark:text-white">Menu</span>
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(false)}
+                  aria-label="Close menu"
+                  className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-600 hover:bg-black/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.08]"
+                >
+                  <X className="h-5 w-5" aria-hidden />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5">
+                <div className="space-y-1">
+                  {links.map((link) => (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      className="focus-ring block rounded-xl px-4 py-3 text-base font-medium text-ink-800 transition-colors hover:bg-black/[0.05] dark:text-zinc-200 dark:hover:bg-white/[0.07]"
+                    >
+                      {link.label}
+                    </Link>
+                  ))}
+                </div>
+
+                {loggedIn && (
+                  <div className="mt-6 border-t border-black/[0.07] pt-5 dark:border-white/[0.07]">
+                    <p className="px-4 pb-2 text-xs font-semibold uppercase tracking-wider text-ink-400">Account</p>
+                    {ACCOUNT_MENU.map(({ label, href, icon: Icon }) => (
+                      <Link
+                        key={href}
+                        href={href}
+                        className="focus-ring flex items-center gap-3 rounded-xl px-4 py-3 text-base text-ink-700 transition-colors hover:bg-black/[0.05] dark:text-zinc-300 dark:hover:bg-white/[0.07]"
+                      >
+                        <Icon className="h-4 w-4 text-ink-400" aria-hidden />
+                        {label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-black/[0.07] p-5 dark:border-white/[0.07]">
+                {loggedIn ? (
+                  <Button variant="secondary" className="w-full" onClick={handleLogout}>
+                    <LogOut className="h-4 w-4" aria-hidden />
+                    Sign out
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <Button href="/signup" className="w-full">
+                      Get started
+                    </Button>
+                    <Button href="/login" variant="secondary" className="w-full">
+                      Sign in
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
   );
 };
