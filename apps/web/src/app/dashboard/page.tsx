@@ -1,35 +1,22 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useAuthStore } from '@/lib/auth-store';
 import {
-  FileText,
-  Download,
-  Trash2,
-  Key,
-  HardDrive,
-  Activity,
-  Plus,
-  Copy,
-  CheckCircle2,
-  ShieldCheck,
-  RefreshCw,
-  Clock,
-  AlertCircle,
-  CreditCard,
-  Settings,
-  Lock,
-  Smartphone,
-  RotateCcw,
-  Sparkles,
-  Tag,
-  Check,
-  XCircle,
+  Activity, AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, CheckCircle2,
+  Clock3, FileText, HardDrive, KeyRound, Layers, Minimize2, Plus, RefreshCw,
+  RotateCcw, ScanText, Scissors, Search, ShieldCheck, Smartphone, Sparkles,
+  UserRound, XCircle, type LucideIcon,
 } from 'lucide-react';
-
-const API_BASE = '';
+import { ApiClient } from '@/lib/api-client';
+import { useAuthStore } from '@/lib/auth-store';
+import { PDF_TOOLS } from '@/lib/tools-registry';
+import { formatDate, selectCurrentSubscription, type BillingHistory } from '@/lib/billing';
+import { downloadAuthenticated, formatBytes } from '@/lib/workspace';
+import { WorkspaceHeader, WorkspaceShell, WorkspaceState } from '@/components/workspace/WorkspaceShell';
+import { Badge, Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Reveal } from '@/components/ui/Motion';
 
 interface UserJob {
   id: string;
@@ -40,869 +27,248 @@ interface UserJob {
   outputFileSizeBytes: number | string | null;
   durationMs: number | null;
   createdAt: string;
-  inputFilesPayload: any;
-  errorMessage?: string;
+  inputFilesPayload: unknown;
+  errorMessage?: string | null;
 }
 
-interface ApiKeyItem {
+interface Profile {
   id: string;
-  name: string;
-  keyPrefix: string;
-  rateLimitRpm: number;
-  lastUsedAt: string | null;
-  createdAt: string;
+  email: string;
+  name?: string | null;
+  isEmailVerified?: boolean;
+  storageUsedBytes?: number | string | null;
+  storageLimitBytes?: number | string | null;
+  createdAt?: string;
 }
 
-interface UserSessionItem {
-  id: string;
-  userAgent: string | null;
-  ipAddress: string | null;
-  lastActiveAt: string;
-  createdAt: string;
+interface Resource<T> { data: T | null; loading: boolean; error: string }
+const initialResource = <T,>(): Resource<T> => ({ data: null, loading: true, error: '' });
+const ongoingStatuses = new Set(['QUEUED', 'PROCESSING', 'PENDING']);
+const quickTools: { id: string; icon: LucideIcon; description: string }[] = [
+  { id: 'compress', icon: Minimize2, description: 'Make a smaller PDF' },
+  { id: 'merge', icon: Layers, description: 'Bring documents together' },
+  { id: 'split', icon: Scissors, description: 'Keep the pages you need' },
+  { id: 'pdf-to-word', icon: FileText, description: 'Continue editing in Word' },
+  { id: 'ocr', icon: ScanText, description: 'Recognize scanned text' },
+  { id: 'protect', icon: ShieldCheck, description: 'Add PDF password protection' },
+];
+
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : 'This information could not be loaded.';
 }
 
-interface PaymentItem {
-  id: string;
-  provider: string;
-  amount: number;
-  currency: string;
-  status: string;
-  createdAt: string;
+function numericBytes(value: Profile['storageUsedBytes']) {
+  if (value === null || value === undefined || value === '') return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
 
-interface InvoiceItem {
-  id: string;
-  invoiceNumber: string;
-  amount: number;
-  currency: string;
-  status: string;
-  createdAt: string;
+function inputNames(job: UserJob) {
+  if (!Array.isArray(job.inputFilesPayload)) return [];
+  return job.inputFilesPayload.flatMap((file) =>
+    file && typeof file === 'object' && typeof file.name === 'string' ? [file.name as string] : []);
+}
+
+function toolName(value: string) {
+  const normalized = value.toLowerCase().replaceAll('_', '-');
+  return PDF_TOOLS.find((tool) => tool.id === normalized || tool.slug === normalized)?.name
+    || value.replaceAll('_', ' ').replaceAll('-', ' ');
+}
+
+function durationLabel(value: number | null) {
+  if (value === null || !Number.isFinite(value) || value < 0) return 'Not recorded';
+  return value < 1000 ? `${value.toLocaleString()} ms` : `${(value / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s`;
+}
+
+function JobStatus({ status }: { status: string }) {
+  const normalized = status.toUpperCase();
+  const Icon = normalized === 'COMPLETED' ? CheckCircle2 : normalized === 'FAILED' ? XCircle : ongoingStatuses.has(normalized) ? Clock3 : FileText;
+  const color = normalized === 'COMPLETED'
+    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+    : normalized === 'FAILED'
+      ? 'border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+      : ongoingStatuses.has(normalized)
+        ? 'border-brand-500/20 bg-brand-500/10 text-brand-700 dark:text-brand-200'
+        : 'border-[var(--card-border)] bg-black/[0.03] text-[var(--muted)] dark:bg-white/[0.04]';
+  return <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize ${color}`}><Icon className="h-3 w-3" aria-hidden />{status.toLowerCase().replaceAll('_', ' ')}</span>;
+}
+
+function Metric({ title, icon: Icon, value, note, loading, testId }: {
+  title: string; icon: LucideIcon; value: ReactNode; note: string; loading: boolean; testId: string;
+}) {
+  return <Card className="p-5 sm:p-6"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium text-[var(--muted)]">{title}</p><Icon className="h-4 w-4 text-brand-500" aria-hidden /></div><div data-testid={testId} className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">{loading ? <span className="skeleton inline-block h-8 w-20 rounded-lg" aria-label={`Loading ${title.toLowerCase()}`} /> : value}</div><p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">{note}</p></Card>;
+}
+
+function ResourceError({ label, resource, onRetry }: { label: string; resource: Resource<unknown>; onRetry: () => void }) {
+  if (!resource.error) return null;
+  return <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-500/20 bg-rose-500/[0.06] px-4 py-3 text-sm"><p className="flex min-w-0 flex-1 items-start gap-2 text-rose-700 dark:text-rose-300"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /><span className="break-words"><strong>{label}:</strong> {resource.error}{resource.data !== null ? ' Previously loaded information is shown.' : ''}</span></p><Button size="sm" variant="ghost" onClick={onRetry}>Try again</Button></div>;
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const { user, token, isAuthenticated, isHydrated, syncProfile } = useAuthStore();
+  const { user, isHydrated, isAuthenticated } = useAuthStore();
+  const [jobs, setJobs] = useState<Resource<UserJob[]>>(initialResource);
+  const [billing, setBilling] = useState<Resource<BillingHistory>>(initialResource);
+  const [profile, setProfile] = useState<Resource<Profile>>(initialResource);
+  const [refreshing, setRefreshing] = useState(false);
+  const [busyJob, setBusyJob] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [actionNotice, setActionNotice] = useState('');
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const requestGeneration = useRef(0);
+  const jobGeneration = useRef(0);
+
+  const getJobs = useCallback(async () => {
+    const data = await ApiClient.request<UserJob[]>('/pdf/jobs/user/history');
+    if (!Array.isArray(data) || data.some((job) => typeof job.id !== 'string' || typeof job.tool !== 'string' || typeof job.status !== 'string')) throw new Error('The processing service returned incomplete job information.');
+    return data;
+  }, []);
+
+  const refreshJobs = useCallback(async () => {
+    const generation = ++jobGeneration.current;
+    try {
+      const data = await getJobs();
+      if (generation === jobGeneration.current) setJobs({ data, loading: false, error: '' });
+    } catch (error) {
+      if (generation === jobGeneration.current) setJobs((previous) => ({ ...previous, loading: false, error: errorText(error) }));
+    }
+  }, [getJobs]);
+
+  const loadDashboard = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    const jobsGeneration = ++jobGeneration.current;
+    setRefreshing(true);
+    setJobs((previous) => ({ ...previous, loading: previous.data === null, error: '' }));
+    setBilling((previous) => ({ ...previous, loading: previous.data === null, error: '' }));
+    setProfile((previous) => ({ ...previous, loading: previous.data === null, error: '' }));
+    const [jobResult, billingResult, profileResult] = await Promise.allSettled([
+      getJobs(),
+      ApiClient.request<BillingHistory>('/billing/history').then((data) => {
+        if (!data || !['FREE', 'PRO', 'BUSINESS', 'ENTERPRISE'].includes(data.currentPlan) || !Array.isArray(data.subscriptions)) throw new Error('The billing service returned incomplete subscription information.');
+        return data;
+      }),
+      ApiClient.request<Profile>('/auth/me').then((data) => {
+        if (!data || typeof data.id !== 'string' || typeof data.email !== 'string') throw new Error('Your account information is incomplete.');
+        return data;
+      }),
+    ]);
+    if (generation !== requestGeneration.current) return;
+    if (jobsGeneration === jobGeneration.current) {
+      if (jobResult.status === 'fulfilled') setJobs({ data: jobResult.value, loading: false, error: '' });
+      else setJobs((previous) => ({ ...previous, loading: false, error: errorText(jobResult.reason) }));
+    }
+    if (billingResult.status === 'fulfilled') setBilling({ data: billingResult.value, loading: false, error: '' });
+    else setBilling((previous) => ({ ...previous, loading: false, error: errorText(billingResult.reason) }));
+    if (profileResult.status === 'fulfilled') setProfile({ data: profileResult.value, loading: false, error: '' });
+    else setProfile((previous) => ({ ...previous, loading: false, error: errorText(profileResult.reason) }));
+    setRefreshing(false);
+  }, [getJobs]);
 
   useEffect(() => {
-    if (isHydrated && !isAuthenticated && !token && typeof window !== 'undefined' && !localStorage.getItem('doxera_token')) {
-      router.push('/login?redirect=/dashboard');
-    }
-  }, [isHydrated, isAuthenticated, token, router]);
-  const [activeTab, setActiveTab] = useState<'jobs' | 'subscription' | 'keys' | 'security'>('jobs');
+    if (!isHydrated || !isAuthenticated) return;
+    void loadDashboard();
+    return () => { requestGeneration.current += 1; jobGeneration.current += 1; };
+  }, [isHydrated, isAuthenticated, loadDashboard]);
 
-  const [jobs, setJobs] = useState<UserJob[]>([]);
-  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
-  const [sessions, setSessions] = useState<UserSessionItem[]>([]);
-  const [payments, setPayments] = useState<PaymentItem[]>([]);
-  const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // API Key creation
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [createdPlainKey, setCreatedPlainKey] = useState<string | null>(null);
-  const [keyGenerating, setKeyGenerating] = useState(false);
-
-  // Security / Password
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [passwordMsg, setPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  // Coupon / Promo
-  const [couponCode, setCouponCode] = useState('');
-  const [couponResult, setCouponResult] = useState<any>(null);
-  const [applyingCoupon, setApplyingCoupon] = useState(false);
-
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-
-    if (!authToken) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      // 1. Fetch User Jobs History
-      const jobsRes = await fetch(`${API_BASE}/api/v1/pdf/jobs/user/history`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (jobsRes.ok) {
-        const jobsData = await jobsRes.json();
-        setJobs(jobsData || []);
-      }
-
-      // 2. Fetch Developer API Keys
-      const keysRes = await fetch(`${API_BASE}/api/v1/auth/api-keys`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (keysRes.ok) {
-        const keysData = await keysRes.json();
-        setApiKeys(keysData || []);
-      }
-
-      // 3. Fetch Billing History
-      const billingRes = await fetch(`${API_BASE}/api/v1/billing/history`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (billingRes.ok) {
-        const billingData = await billingRes.json();
-        if (billingData.payments) setPayments(billingData.payments);
-        if (billingData.invoices) setInvoices(billingData.invoices);
-      }
-
-      // 4. Fetch Active Sessions
-      const sessionsRes = await fetch(`${API_BASE}/api/v1/auth/sessions`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (sessionsRes.ok) {
-        const sessionsData = await sessionsRes.json();
-        setSessions(sessionsData || []);
-      }
-    } catch (err) {
-      console.warn('Dashboard fetch error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  const activeJobs = jobs.data?.filter((job) => ongoingStatuses.has(job.status.toUpperCase())) || [];
   useEffect(() => {
-    fetchDashboardData();
-  }, [token]);
+    if (!activeJobs.length || !isAuthenticated) return;
+    let pending = false;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible' || pending) return;
+      pending = true;
+      void refreshJobs().finally(() => { pending = false; });
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [activeJobs.length, isAuthenticated, refreshJobs]);
 
-  const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(id);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const handleGenerateApiKey = async () => {
-    const keyName = prompt('Enter a recognizable name for this API Key:', 'Production Integration Key');
-    if (!keyName) return;
-
-    const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
-
-    setKeyGenerating(true);
+  const performJobAction = async (job: UserJob, action: 'retry' | 'download') => {
+    if (busyJob) return;
+    setBusyJob(`${job.id}:${action}`); setActionError(''); setActionNotice('');
     try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/api-keys`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ name: keyName, permissions: ['pdf:process', 'ai:query'] }),
-      });
-
-      if (res.ok) {
-        const newKey = await res.json();
-        setCreatedPlainKey(newKey.apiKey);
-        setApiKeys((prev) => [newKey, ...prev]);
+      if (action === 'retry') {
+        const result = await ApiClient.request<{ success: boolean; message?: string }>(`/pdf/jobs/${encodeURIComponent(job.id)}/retry`, { method: 'POST' });
+        if (result.success !== true) throw new Error('The processing service did not confirm this retry. Refresh your job history before trying again.');
+        setActionNotice(result.message || 'Your job was re-queued by the processing service.');
+        await refreshJobs();
       } else {
-        alert('Could not generate API Key. Please try again.');
+        const extension = job.outputFileKey?.split('.').pop();
+        const suffix = extension && /^[a-z0-9]{1,8}$/i.test(extension) ? extension : 'pdf';
+        await downloadAuthenticated(`/pdf/jobs/${encodeURIComponent(job.id)}/download`, `Doxera_${job.tool.replace(/[^a-z0-9-]/gi, '_')}.${suffix}`);
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setKeyGenerating(false);
-    }
+    } catch (error) { setActionError(errorText(error)); }
+    finally { setBusyJob(null); }
   };
 
-  const handleRevokeApiKey = async (keyId: string) => {
-    if (!confirm('Are you sure you want to revoke this API key? Applications using it will lose access immediately.')) {
-      return;
-    }
+  const completed = jobs.data?.filter((job) => job.status.toUpperCase() === 'COMPLETED').length;
+  const failed = jobs.data?.filter((job) => job.status.toUpperCase() === 'FAILED').length;
+  const other = jobs.data ? jobs.data.length - (completed || 0) - activeJobs.length - (failed || 0) : null;
+  const used = numericBytes(profile.data?.storageUsedBytes);
+  const limit = numericBytes(profile.data?.storageLimitBytes);
+  const storagePercent = used !== null && limit !== null && limit > 0 ? used / limit * 100 : null;
+  const subscription = billing.data ? selectCurrentSubscription(billing.data) : null;
+  const filteredJobs = jobs.data?.filter((job) => {
+    const matchesStatus = statusFilter === 'ALL' || job.status.toUpperCase() === statusFilter;
+    return matchesStatus && `${inputNames(job).join(' ')} ${toolName(job.tool)}`.toLowerCase().includes(query.trim().toLowerCase());
+  }) || [];
+  const firstName = (profile.data?.name || user?.name)?.trim().split(/\s+/)[0];
 
-    const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
+  return <WorkspaceShell>
+    <WorkspaceHeader eyebrow="Your document workspace" title={firstName ? `Welcome back, ${firstName}.` : 'Make room for good work.'} description="Your recent documents, processing activity, and account at a glance." actions={<><Button size="sm" variant="secondary" loading={refreshing} onClick={() => void loadDashboard()}><RefreshCw className="h-3.5 w-3.5" aria-hidden />Refresh overview</Button><Button size="sm" href="/#tools"><Plus className="h-4 w-4" aria-hidden />New document job</Button></>} />
+    <div className="space-y-7">
+      <div className="space-y-3"><ResourceError label="Processing history" resource={jobs} onRetry={() => void loadDashboard()} /><ResourceError label="Subscription" resource={billing} onRetry={() => void loadDashboard()} /><ResourceError label="Account" resource={profile} onRetry={() => void loadDashboard()} /></div>
 
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/api-keys/${keyId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (res.ok) {
-        setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+      <Reveal><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric title="Recent jobs" icon={FileText} value={jobs.data?.length ?? 'Unavailable'} note="Latest 20 jobs returned by the service" loading={jobs.loading} testId="dashboard-recent-count" />
+        <Metric title="Completed" icon={CheckCircle2} value={completed ?? 'Unavailable'} note="Finished within your recent history" loading={jobs.loading} testId="dashboard-completed-count" />
+        <Metric title="In progress" icon={Activity} value={jobs.data ? activeJobs.length : 'Unavailable'} note="Queued or processing in recent jobs" loading={jobs.loading} testId="dashboard-active-count" />
+        <Metric title="Storage used" icon={HardDrive} value={used === null ? 'Unavailable' : formatBytes(used)} note={limit === null ? 'Storage allowance is unavailable' : `Of ${formatBytes(limit)} account storage`} loading={profile.loading} testId="dashboard-storage-used" />
+      </div></Reveal>
 
-  const handleRetryJob = async (jobId: string) => {
-    const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-6">
+          <Reveal><Card className="p-6 sm:p-7">
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold tracking-tight">A little less on your plate.</h2><p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">Processing activity across your latest 20 jobs.</p></div><Activity className="h-5 w-5 text-brand-500" aria-hidden /></div>
+            {jobs.loading ? <div className="skeleton mt-7 h-20 rounded-xl" aria-label="Loading activity" /> : jobs.data === null ? <p className="mt-7 rounded-xl bg-black/[0.025] p-4 text-sm text-[var(--muted)] dark:bg-white/[0.03]">Activity is unavailable while processing history cannot be loaded.</p> : jobs.data.length === 0 ? <div className="mt-6 rounded-xl border border-dashed border-[var(--card-border)] p-5"><p className="text-sm font-medium">Your next document is a good place to start.</p><p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">Run any PDF tool and its progress will appear here.</p></div> : <>
+              <div className="mt-7 flex h-3 overflow-hidden rounded-full bg-black/[0.04] dark:bg-white/[0.05]" aria-hidden>{[{ count: completed || 0, color: 'bg-emerald-500' }, { count: activeJobs.length, color: 'bg-brand-500' }, { count: failed || 0, color: 'bg-rose-500' }, { count: other || 0, color: 'bg-zinc-400' }].map((segment, index) => <div key={index} className={segment.color} style={{ width: `${segment.count / jobs.data!.length * 100}%` }} />)}</div>
+              <div className="mt-5 grid grid-cols-2 gap-x-5 gap-y-4 text-xs sm:grid-cols-4">{[{ label: 'Completed', count: completed, color: 'bg-emerald-500' }, { label: 'In progress', count: activeJobs.length, color: 'bg-brand-500' }, { label: 'Failed', count: failed, color: 'bg-rose-500' }, { label: 'Other', count: other, color: 'bg-zinc-400' }].map((item) => <div key={item.label}><p className="flex items-center gap-2 text-[var(--muted)]"><span className={`h-2 w-2 rounded-full ${item.color}`} aria-hidden />{item.label}</p><p className="mt-2 pl-4 text-base font-semibold">{item.count}</p></div>)}</div>
+              {activeJobs.length > 0 && <p className="mt-5 flex items-center gap-2 text-xs text-brand-700 dark:text-brand-200"><RefreshCw className="h-3 w-3 animate-spin" aria-hidden />Active job statuses refresh while this page is visible.</p>}
+            </>}
+          </Card></Reveal>
 
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/pdf/jobs/${jobId}/retry`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (res.ok) {
-        fetchDashboardData();
-      }
-    } catch (err) {
-      console.error('Retry error:', err);
-    }
-  };
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordMsg(null);
-    const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/change-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ oldPassword, newPassword }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setPasswordMsg({ type: 'success', text: data.message || 'Password changed successfully.' });
-        setOldPassword('');
-        setNewPassword('');
-      } else {
-        setPasswordMsg({ type: 'error', text: data.message || 'Could not change password.' });
-      }
-    } catch (err: any) {
-      setPasswordMsg({ type: 'error', text: err.message || 'Network error' });
-    }
-  };
-
-  const handleRevokeSession = async (sessionId: string) => {
-    const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/sessions/${sessionId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (res.ok) {
-        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleApplyCoupon = async () => {
-    if (!couponCode) return;
-    setApplyingCoupon(true);
-    setCouponResult(null);
-
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/billing/coupons/apply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: couponCode.trim(), tier: 'PRO' }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setCouponResult({ success: true, ...data });
-      } else {
-        setCouponResult({ success: false, message: data.message || 'Invalid coupon code' });
-      }
-    } catch (err: any) {
-      setCouponResult({ success: false, message: err.message || 'Failed to apply coupon' });
-    } finally {
-      setApplyingCoupon(false);
-    }
-  };
-
-  const handleCancelSubscription = async () => {
-    if (!confirm('Are you sure you want to cancel your recurring subscription? You will retain access until the end of the billing period.')) {
-      return;
-    }
-
-    const authToken =
-      token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/billing/subscription/cancel`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      const data = await res.json();
-      alert(data.message || 'Subscription cancellation scheduled.');
-      fetchDashboardData();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const formatFileSize = (bytes?: number | string | null) => {
-    if (!bytes) return '0 KB';
-    const num = Number(bytes);
-    if (num < 1024) return `${num} B`;
-    if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`;
-    return `${(num / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  return (
-    <div className="min-h-screen bg-[#fbfbfd] py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header Profile Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-zinc-200">
-          <div>
-            <h1 className="text-2xl font-semibold text-zinc-900 tracking-tight">
-              Welcome back, {user?.name || (isAuthenticated ? 'Enterprise User' : 'Guest')}
-            </h1>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              Enterprise Dashboard &bull; Production Workspace &bull; Zero-Retention Guarantee
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-              {user?.plan || 'PRO'} Plan
-            </span>
-            <button
-              onClick={fetchDashboardData}
-              className="p-2 rounded-full border border-zinc-200 hover:bg-zinc-100 text-zinc-600 transition-colors"
-              title="Refresh telemetry"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-            <Link
-              href="/pricing"
-              className="text-xs font-medium px-4 py-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-1.5"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Upgrade Plan</span>
-            </Link>
-          </div>
+          <Reveal><Card className="p-6 sm:p-7"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold tracking-tight">Start something useful.</h2><p className="mt-2 text-sm text-[var(--muted)]">A few shortcuts to your PDF tools.</p></div><Link href="/#tools" className="focus-ring inline-flex items-center gap-1 rounded-md text-xs font-semibold text-brand-600 dark:text-brand-300">All {PDF_TOOLS.length} tools<ArrowUpRight className="h-3.5 w-3.5" aria-hidden /></Link></div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">{quickTools.map(({ id, icon: Icon, description }) => {
+              const tool = PDF_TOOLS.find((item) => item.id === id);
+              return tool ? <Link key={id} href={tool.route} className="focus-ring group flex items-start gap-3 rounded-2xl border border-[var(--card-border)] p-4 transition-[border-color,background-color] hover:border-brand-500/30 hover:bg-brand-500/[0.04]"><span className="rounded-xl bg-brand-500/10 p-2.5 text-brand-600 dark:text-brand-300"><Icon className="h-4 w-4" aria-hidden /></span><span className="min-w-0"><span className="block text-xs font-semibold">{tool.name}</span><span className="mt-1.5 block text-xs leading-relaxed text-[var(--muted)]">{description}</span></span><ArrowUpRight className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--muted)] transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden /></Link> : null;
+            })}</div>
+          </Card></Reveal>
         </div>
 
-        {/* Top Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-          <div className="p-5 rounded-2xl bg-white border border-zinc-200 shadow-sm">
-            <div className="flex items-center justify-between text-zinc-500 mb-3">
-              <span className="text-xs font-medium">Cloud Storage Quota</span>
-              <HardDrive className="w-4 h-4 text-blue-600" />
-            </div>
-            <div className="text-2xl font-bold text-zinc-900 mb-2">
-              1.8 GB <span className="text-xs text-zinc-400 font-normal">/ 10.0 GB</span>
-            </div>
-            <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
-              <div className="bg-blue-600 h-full rounded-full" style={{ width: '18%' }} />
-            </div>
-            <div className="text-[10px] text-zinc-400 mt-2">18% utilized &bull; AWS KMS Encrypted</div>
-          </div>
+        <div className="min-w-0 space-y-6">
+          <Reveal><Card gradientRing className="overflow-hidden p-6 sm:p-7"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-[var(--muted)]">Your plan</span><Sparkles className="h-4 w-4 text-brand-500" aria-hidden /></div>
+            {billing.loading ? <div className="skeleton mt-6 h-28 rounded-xl" aria-label="Loading plan" /> : billing.data ? <><div className="mt-5 flex flex-wrap items-center gap-3"><h2 className="text-3xl font-semibold tracking-tight">{billing.data.currentPlan}</h2>{subscription && <Badge tone={subscription.cancelAtPeriodEnd ? 'warning' : 'success'}>{subscription.cancelAtPeriodEnd ? 'Cancellation scheduled' : subscription.status.toLowerCase()}</Badge>}</div><p className="mt-3 text-sm leading-relaxed text-[var(--muted)]">{subscription ? `${subscription.cancelAtPeriodEnd ? 'Paid access through' : 'Current period ends'} ${formatDate(subscription.currentPeriodEnd)}.` : billing.data.currentPlan === 'FREE' ? 'For the everyday document task. Explore more room when you need it.' : 'Your account entitlement is provided by the billing service.'}</p><div className="mt-6 border-t border-[var(--card-border)] pt-5"><Button size="sm" href="/billing" variant="secondary" className="w-full">Manage plan & billing<ArrowRight className="h-3.5 w-3.5" aria-hidden /></Button></div></> : <p className="mt-5 text-sm leading-relaxed text-[var(--muted)]">Your subscription details are unavailable. Try refreshing your overview or open Billing.</p>}
+          </Card></Reveal>
 
-          <div className="p-5 rounded-2xl bg-white border border-zinc-200 shadow-sm">
-            <div className="flex items-center justify-between text-zinc-500 mb-3">
-              <span className="text-xs font-medium">Conversions Today</span>
-              <Activity className="w-4 h-4 text-emerald-600" />
-            </div>
-            <div className="text-2xl font-bold text-zinc-900 mb-2">
-              {jobs.length} <span className="text-xs text-emerald-600 font-normal">/ Unlimited ({user?.plan || 'PRO'})</span>
-            </div>
-            <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
-              <div className="bg-emerald-600 h-full rounded-full" style={{ width: '100%' }} />
-            </div>
-            <div className="text-[10px] text-zinc-400 mt-2">High-speed priority queue active</div>
-          </div>
+          <Reveal><Card className="p-6 sm:p-7"><h2 className="flex items-center gap-2 text-sm font-semibold"><HardDrive className="h-4 w-4 text-brand-500" aria-hidden />Space for your work</h2>{profile.loading ? <div className="skeleton mt-6 h-16 rounded-xl" aria-label="Loading storage" /> : <><p className="mt-5 text-lg font-semibold">{used === null ? 'Unavailable' : formatBytes(used)}<span className="text-xs font-normal text-[var(--muted)]">{limit === null ? ' · Allowance unavailable' : ` / ${formatBytes(limit)}`}</span></p>{storagePercent !== null && <><div className="mt-4 h-2 overflow-hidden rounded-full bg-black/[0.05] dark:bg-white/[0.06]" aria-hidden><div className="h-full rounded-full bg-gradient-to-r from-brand-600 to-brand-400" style={{ width: `${Math.min(100, storagePercent)}%` }} /></div><p className="mt-3 text-xs text-[var(--muted)]">{storagePercent.toLocaleString(undefined, { maximumFractionDigits: 1 })}% of your account storage used.</p></>}{(used === null || limit === null) && <p className="mt-3 text-xs leading-relaxed text-[var(--muted)]">A storage meter appears when the account service supplies usage and an allowance.</p>}</>}</Card></Reveal>
 
-          <div className="p-5 rounded-2xl bg-white border border-zinc-200 shadow-sm">
-            <div className="flex items-center justify-between text-zinc-500 mb-3">
-              <span className="text-xs font-medium">Enterprise Security</span>
-              <ShieldCheck className="w-4 h-4 text-purple-600" />
-            </div>
-            <div className="text-2xl font-bold text-zinc-900 mb-2">
-              Active <span className="text-xs text-purple-600 font-normal">&bull; DoD 5220.22-M</span>
-            </div>
-            <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
-              <div className="bg-purple-600 h-full rounded-full" style={{ width: '100%' }} />
-            </div>
-            <div className="text-[10px] text-zinc-400 mt-2">Ephemeral 24h retention policy active</div>
-          </div>
+          <Reveal><Card className="p-6 sm:p-7"><h2 className="flex items-center gap-2 text-sm font-semibold"><UserRound className="h-4 w-4 text-brand-500" aria-hidden />Your account</h2>{profile.loading ? <div className="skeleton mt-5 h-20 rounded-xl" aria-label="Loading account" /> : profile.data ? <><p className="mt-5 break-all text-sm font-medium">{profile.data.email}</p><div className="mt-3"><Badge tone={profile.data.isEmailVerified ? 'success' : 'neutral'}>{profile.data.isEmailVerified ? 'Email verified' : 'Email unverified'}</Badge></div><p className="mt-4 text-xs text-[var(--muted)]">Member since {formatDate(profile.data.createdAt)}</p><Link href="/account" className="focus-ring mt-5 inline-flex items-center gap-1 rounded-md text-xs font-semibold text-brand-600 dark:text-brand-300">Manage account<ArrowRight className="h-3.5 w-3.5" aria-hidden /></Link></> : <p className="mt-5 text-sm text-[var(--muted)]">Account details are currently unavailable.</p>}</Card></Reveal>
         </div>
-
-        {/* Tab Navigation */}
-        <div className="border-b border-zinc-200 flex items-center gap-6 text-sm">
-          <button
-            onClick={() => setActiveTab('jobs')}
-            className={`pb-3 font-semibold transition-colors flex items-center gap-2 border-b-2 ${
-              activeTab === 'jobs'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>Processing History ({jobs.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('subscription')}
-            className={`pb-3 font-semibold transition-colors flex items-center gap-2 border-b-2 ${
-              activeTab === 'subscription'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900'
-            }`}
-          >
-            <CreditCard className="w-4 h-4" />
-            <span>Subscription & Billing</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('keys')}
-            className={`pb-3 font-semibold transition-colors flex items-center gap-2 border-b-2 ${
-              activeTab === 'keys'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900'
-            }`}
-          >
-            <Key className="w-4 h-4" />
-            <span>Developer API Keys ({apiKeys.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('security')}
-            className={`pb-3 font-semibold transition-colors flex items-center gap-2 border-b-2 ${
-              activeTab === 'security'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900'
-            }`}
-          >
-            <Lock className="w-4 h-4" />
-            <span>Security & Sessions</span>
-          </button>
-        </div>
-
-        {/* TAB 1: Processing Jobs History */}
-        {activeTab === 'jobs' && (
-          <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h3 className="text-base font-semibold text-zinc-900">Recent Processing Jobs</h3>
-                <p className="text-xs text-zinc-500">
-                  Ephemeral retention: files automatically purge 24 hours after completion
-                </p>
-              </div>
-              <Link
-                href="/#tools"
-                className="text-xs font-semibold px-3.5 py-1.5 rounded-full bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors flex items-center gap-1"
-              >
-                + New Document Job
-              </Link>
-            </div>
-
-            <div className="border border-zinc-100 rounded-xl overflow-hidden overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-50 border-b border-zinc-100 text-zinc-500 font-medium">
-                  <tr>
-                    <th className="py-3 px-4">Document / Payload</th>
-                    <th className="py-3 px-4">Tool</th>
-                    <th className="py-3 px-4">Output Size</th>
-                    <th className="py-3 px-4">Duration</th>
-                    <th className="py-3 px-4 text-center">Status</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100 text-zinc-700">
-                  {jobs.length > 0 ? (
-                    jobs.map((job) => {
-                      const docName =
-                        Array.isArray(job.inputFilesPayload) && job.inputFilesPayload[0]?.name
-                          ? job.inputFilesPayload[0].name
-                          : `Job_${job.id.slice(0, 8)}.pdf`;
-
-                      return (
-                        <tr key={job.id} className="hover:bg-zinc-50/50">
-                          <td className="py-3 px-4 font-medium text-zinc-900 flex items-center gap-2">
-                            <FileText className="w-4 h-4 text-blue-500 shrink-0" />
-                            <span className="truncate max-w-[200px]">{docName}</span>
-                          </td>
-                          <td className="py-3 px-4 text-zinc-600 uppercase font-mono text-[11px]">
-                            {job.tool}
-                          </td>
-                          <td className="py-3 px-4 text-zinc-500 font-mono text-[11px]">
-                            {formatFileSize(job.outputFileSizeBytes)}
-                          </td>
-                          <td className="py-3 px-4 text-zinc-500">
-                            {job.durationMs ? `${job.durationMs}ms` : 'Instant'}
-                          </td>
-                          <td className="py-3 px-4 text-center">
-                            <span
-                              className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                job.status === 'COMPLETED'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : job.status === 'FAILED'
-                                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
-                              }`}
-                            >
-                              {job.status === 'COMPLETED' && <CheckCircle2 className="w-3 h-3" />}
-                              {job.status === 'FAILED' && <AlertCircle className="w-3 h-3" />}
-                              {job.status}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              {job.status === 'COMPLETED' && (
-                                <a
-                                  href={`${API_BASE}/api/v1/pdf/jobs/${job.id}/download`}
-                                  download
-                                  className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
-                                  title="Download processed document"
-                                >
-                                  <Download className="w-3.5 h-3.5" /> Download
-                                </a>
-                              )}
-                              {job.status === 'FAILED' && (
-                                <button
-                                  onClick={() => handleRetryJob(job.id)}
-                                  className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-md bg-amber-50 text-amber-800 hover:bg-amber-100 transition-colors"
-                                  title="Retry failed conversion"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" /> Retry
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-zinc-400">
-                        No processing jobs yet. Upload a document from any tool to get started.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: Subscription & Billing */}
-        {activeTab === 'subscription' && (
-          <div className="space-y-6">
-            {/* Active Subscription Details */}
-            <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div>
-                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase tracking-wide">
-                  Active Subscription
-                </span>
-                <h3 className="text-xl font-bold text-zinc-900 mt-2">
-                  Doxera {user?.plan || 'PRO'} Tier
-                </h3>
-                <p className="text-xs text-zinc-500 mt-1">
-                  Enjoy unlimited daily conversions, OCR, 500MB+ file uploads, and full document intelligence.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <a
-                  href={`${API_BASE}/api/v1/billing/invoice/download`}
-                  className="px-4 py-2 rounded-xl border border-zinc-200 text-zinc-700 text-xs font-semibold hover:bg-zinc-50 transition flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" /> Download Latest Tax Invoice
-                </a>
-                <button
-                  onClick={handleCancelSubscription}
-                  className="px-4 py-2 rounded-xl border border-rose-200 text-rose-600 text-xs font-semibold hover:bg-rose-50 transition"
-                >
-                  Cancel Plan
-                </button>
-              </div>
-            </div>
-
-            {/* Promo Code & Coupon Redemption */}
-            <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">
-              <h3 className="text-base font-semibold text-zinc-900 mb-1 flex items-center gap-2">
-                <Tag className="w-4 h-4 text-blue-600" /> Redeem Promotional Coupon
-              </h3>
-              <p className="text-xs text-zinc-500 mb-4">
-                Have a coupon code? Enter it below to unlock instant discounts on your next billing cycle.
-              </p>
-
-              <div className="flex items-center gap-3 max-w-md">
-                <input
-                  type="text"
-                  placeholder="e.g. WELCOME50 or PRO2026"
-                  value={couponCode}
-                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                  className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
-                />
-                <button
-                  onClick={handleApplyCoupon}
-                  disabled={applyingCoupon || !couponCode}
-                  className="px-5 py-2.5 rounded-xl bg-zinc-900 text-white text-xs font-semibold hover:bg-zinc-800 transition disabled:opacity-50 whitespace-nowrap"
-                >
-                  {applyingCoupon ? 'Checking...' : 'Apply Code'}
-                </button>
-              </div>
-
-              {couponResult && (
-                <div
-                  className={`mt-3 p-3 rounded-xl text-xs flex items-center gap-2 ${
-                    couponResult.success
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                      : 'bg-rose-50 text-rose-800 border border-rose-200'
-                  }`}
-                >
-                  {couponResult.success ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>
-                        {couponResult.message} &bull; Final price: ${couponResult.finalAmount} (was ${couponResult.originalAmount})
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                      <span>{couponResult.message}</span>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Payment History */}
-            <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">
-              <h3 className="text-base font-semibold text-zinc-900 mb-1">Payment Transactions & History</h3>
-              <p className="text-xs text-zinc-500 mb-4">
-                Transactions processed across Stripe, Razorpay, and PayPal
-              </p>
-
-              <div className="border border-zinc-100 rounded-xl overflow-hidden overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-zinc-50 border-b border-zinc-100 text-zinc-500 font-medium">
-                    <tr>
-                      <th className="py-3 px-4">Transaction ID</th>
-                      <th className="py-3 px-4">Provider</th>
-                      <th className="py-3 px-4">Amount</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4 text-right">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-100 text-zinc-700">
-                    {payments.length > 0 ? (
-                      payments.map((p) => (
-                        <tr key={p.id}>
-                          <td className="py-3 px-4 font-mono text-[11px] text-zinc-900">{p.id.slice(0, 12)}...</td>
-                          <td className="py-3 px-4 uppercase font-semibold text-zinc-600">{p.provider}</td>
-                          <td className="py-3 px-4 font-semibold text-zinc-900">${p.amount} {p.currency}</td>
-                          <td className="py-3 px-4">
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              {p.status}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right text-zinc-500">
-                            {new Date(p.createdAt).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="py-6 text-center text-zinc-400">
-                          No previous payment records found on this account.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: Developer API Keys */}
-        {activeTab === 'keys' && (
-          <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h3 className="text-base font-semibold text-zinc-900">Developer API Keys</h3>
-                <p className="text-xs text-zinc-500">
-                  Authenticate your backend services and scripts with 120 RPM rate limits
-                </p>
-              </div>
-              <button
-                onClick={handleGenerateApiKey}
-                disabled={keyGenerating}
-                className="text-xs font-semibold px-3.5 py-1.5 rounded-full bg-zinc-900 text-white hover:bg-zinc-800 transition flex items-center gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" /> Generate New Key
-              </button>
-            </div>
-
-            {createdPlainKey && (
-              <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
-                <div className="font-semibold mb-1 flex items-center gap-1.5">
-                  <AlertCircle className="w-4 h-4 text-amber-600" /> Store Your API Key Now
-                </div>
-                <p className="mb-2 text-[11px] text-amber-800">
-                  This key will never be shown again. Copy it to your environment variables:
-                </p>
-                <div className="flex items-center gap-2">
-                  <code className="p-2 rounded bg-white border border-amber-200 font-mono text-[11px] flex-1 break-all">
-                    {createdPlainKey}
-                  </code>
-                  <button
-                    onClick={() => handleCopy(createdPlainKey, 'new')}
-                    className="px-3 py-1.5 rounded bg-amber-600 text-white font-semibold hover:bg-amber-700 transition"
-                  >
-                    {copiedKey === 'new' ? 'Copied!' : 'Copy'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="border border-zinc-100 rounded-xl overflow-hidden overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-50 border-b border-zinc-100 text-zinc-500 font-medium">
-                  <tr>
-                    <th className="py-3 px-4">Name</th>
-                    <th className="py-3 px-4">Prefix</th>
-                    <th className="py-3 px-4">Rate Limit</th>
-                    <th className="py-3 px-4">Created</th>
-                    <th className="py-3 px-4 text-right">Revoke</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100 text-zinc-700">
-                  {apiKeys.length > 0 ? (
-                    apiKeys.map((key) => (
-                      <tr key={key.id}>
-                        <td className="py-3 px-4 font-semibold text-zinc-900">{key.name}</td>
-                        <td className="py-3 px-4 font-mono text-zinc-600">{key.keyPrefix}...</td>
-                        <td className="py-3 px-4 text-zinc-500">{key.rateLimitRpm} req/min</td>
-                        <td className="py-3 px-4 text-zinc-500">{new Date(key.createdAt).toLocaleDateString()}</td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => handleRevokeApiKey(key.id)}
-                            className="text-rose-600 hover:text-rose-800 font-semibold p-1 hover:bg-rose-50 rounded"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="py-6 text-center text-zinc-400">
-                        No active developer keys. Click Generate New Key above to start.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: Security & Active Sessions */}
-        {activeTab === 'security' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Change Password Form */}
-            <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">
-              <h3 className="text-base font-semibold text-zinc-900 mb-1 flex items-center gap-2">
-                <Lock className="w-4 h-4 text-blue-600" /> Change Account Password
-              </h3>
-              <p className="text-xs text-zinc-500 mb-4">
-                Update your local authentication credentials with minimum 8 characters.
-              </p>
-
-              <form onSubmit={handleChangePassword} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1">Current Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={oldPassword}
-                    onChange={(e) => setOldPassword(e.target.value)}
-                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1">New Password</label>
-                  <input
-                    type="password"
-                    required
-                    minLength={8}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-
-                {passwordMsg && (
-                  <div
-                    className={`p-3 rounded-xl text-xs ${
-                      passwordMsg.type === 'success'
-                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                        : 'bg-rose-50 text-rose-800 border border-rose-200'
-                    }`}
-                  >
-                    {passwordMsg.text}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-zinc-900 text-white text-xs font-semibold hover:bg-zinc-800 transition"
-                >
-                  Update Password
-                </button>
-              </form>
-            </div>
-
-            {/* Active Sessions List */}
-            <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">
-              <h3 className="text-base font-semibold text-zinc-900 mb-1 flex items-center gap-2">
-                <Smartphone className="w-4 h-4 text-purple-600" /> Active Logged-in Sessions
-              </h3>
-              <p className="text-xs text-zinc-500 mb-4">
-                Devices currently authenticated into this workspace.
-              </p>
-
-              <div className="space-y-3">
-                {sessions.length > 0 ? (
-                  sessions.map((sess) => (
-                    <div
-                      key={sess.id}
-                      className="p-3.5 rounded-xl border border-zinc-100 bg-zinc-50 flex items-center justify-between"
-                    >
-                      <div className="min-w-0 pr-2">
-                        <div className="text-xs font-semibold text-zinc-900 truncate">
-                          {sess.userAgent?.split(' ')[0] || 'Browser Session'}
-                        </div>
-                        <div className="text-[10px] text-zinc-500 mt-0.5">
-                          IP: {sess.ipAddress || '127.0.0.1'} &bull; Active: {new Date(sess.lastActiveAt).toLocaleTimeString()}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => handleRevokeSession(sess.id)}
-                        className="text-xs font-semibold px-2.5 py-1 rounded bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 transition"
-                      >
-                        Revoke
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <div className="py-6 text-center text-xs text-zinc-400">
-                    Current active session is validated.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
+
+      <Reveal><Card className="overflow-hidden"><div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--card-border)] p-6 sm:p-7"><div><h2 className="text-lg font-semibold tracking-tight">Recent jobs & documents</h2><p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">Your latest 20 processing jobs. Downloads depend on file availability.</p></div><Badge tone="neutral">{jobs.data ? `${jobs.data.length} recent` : 'History'}</Badge></div>
+        {actionError && <div role="alert" className="mx-6 mt-5 flex items-start gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-300"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />{actionError}</div>}
+        {actionNotice && <p role="status" className="mx-6 mt-5 rounded-xl bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300">{actionNotice}</p>}
+        {jobs.loading ? <div role="status" aria-label="Loading recent jobs" className="space-y-4 p-6">{[0, 1, 2].map((item) => <div key={item} className="skeleton h-14 rounded-xl" />)}</div> : jobs.data === null ? <div className="p-6"><WorkspaceState title="Your job history is unavailable" description="Your other workspace information is still available above." error={jobs.error} onRetry={() => void loadDashboard()} /></div> : jobs.data.length === 0 ? <div className="px-6 py-14 text-center"><span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-500"><FileText className="h-6 w-6" aria-hidden /></span><h3 className="mt-5 text-base font-semibold">Your documents, soon to be here.</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-[var(--muted)]">No processing jobs yet. Choose a PDF tool and upload your first document to get started.</p><Button className="mt-6" href="/#tools" size="sm">Explore PDF tools<ArrowRight className="h-3.5 w-3.5" aria-hidden /></Button></div> : <>
+          <div className="flex flex-wrap gap-3 border-b border-[var(--card-border)] px-6 py-4"><div className="relative min-w-0 flex-1 basis-48"><label htmlFor="job-search" className="sr-only">Search recent documents or tools</label><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[var(--muted)]" aria-hidden /><input id="job-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a document or tool" className="focus-ring h-10 w-full rounded-xl border border-[var(--card-border)] bg-[var(--background)] pl-9 pr-3 text-sm placeholder:text-[var(--muted)]" /></div><label className="sr-only" htmlFor="job-status">Filter jobs by status</label><select id="job-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="focus-ring h-10 max-w-full rounded-xl border border-[var(--card-border)] bg-[var(--background)] px-3 text-xs"><option value="ALL">All statuses</option>{['COMPLETED', 'PROCESSING', 'QUEUED', 'FAILED', 'CANCELED'].map((status) => <option key={status} value={status}>{status.charAt(0) + status.slice(1).toLowerCase()}</option>)}</select></div>
+          {filteredJobs.length === 0 ? <div className="p-10 text-center"><p className="text-sm text-[var(--muted)]">No recent jobs match this search.</p><Button variant="ghost" size="sm" className="mt-3" onClick={() => { setQuery(''); setStatusFilter('ALL'); }}>Clear filters</Button></div> : <div className="overflow-x-auto"><table className="w-full min-w-[690px] text-left text-xs"><caption className="sr-only">Recent document processing jobs and their status</caption><thead className="border-b border-[var(--card-border)] bg-black/[0.02] text-[var(--muted)] dark:bg-white/[0.02]"><tr><th scope="col" className="px-6 py-4 font-medium">Document / tool</th><th scope="col" className="px-4 py-4 font-medium">Output</th><th scope="col" className="px-4 py-4 font-medium">Status</th><th scope="col" className="px-4 py-4 font-medium">Created</th><th scope="col" className="px-6 py-4 text-right font-medium">Actions</th></tr></thead><tbody className="divide-y divide-[var(--card-border)]">{filteredJobs.map((job) => {
+            const names = inputNames(job);
+            const ongoing = ongoingStatuses.has(job.status.toUpperCase());
+            return <tr key={job.id} className="transition-colors hover:bg-black/[0.015] dark:hover:bg-white/[0.02]"><td className="max-w-[290px] px-6 py-5"><div className="flex items-start gap-3"><span className="mt-0.5 rounded-lg bg-brand-500/10 p-2 text-brand-500"><FileText className="h-4 w-4" aria-hidden /></span><div className="min-w-0"><p className="break-all font-medium leading-relaxed">{names[0] || 'Input filename unavailable'}{names.length > 1 && <span className="ml-1 text-[var(--muted)]">+{names.length - 1} more</span>}</p><p className="mt-1.5 text-[var(--muted)]">{toolName(job.tool)}</p>{job.status.toUpperCase() === 'FAILED' && job.errorMessage && <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-rose-700 dark:text-rose-300" title={job.errorMessage}>{job.errorMessage}</p>}</div></div></td><td className="px-4 py-5"><p className="font-medium">{job.outputFileSizeBytes === null || job.outputFileSizeBytes === undefined ? 'Not available' : formatBytes(job.outputFileSizeBytes)}</p><p className="mt-1.5 text-[11px] text-[var(--muted)]">{durationLabel(job.durationMs)}</p></td><td className="px-4 py-5"><JobStatus status={job.status} />{ongoing && Number.isFinite(job.progress) && <p className="mt-2 text-[11px] text-[var(--muted)]">{Math.min(100, Math.max(0, job.progress))}% reported</p>}</td><td className="whitespace-nowrap px-4 py-5 text-[var(--muted)]">{formatDate(job.createdAt)}</td><td className="px-6 py-5 text-right">{job.status.toUpperCase() === 'COMPLETED' && job.outputFileKey ? <Button size="sm" variant="secondary" disabled={Boolean(busyJob)} loading={busyJob === `${job.id}:download`} onClick={() => void performJobAction(job, 'download')} aria-label={`Download ${names[0] || 'processed document'}`}><ArrowDownToLine className="h-3.5 w-3.5" aria-hidden />Download</Button> : job.status.toUpperCase() === 'FAILED' ? <Button size="sm" variant="secondary" disabled={Boolean(busyJob)} loading={busyJob === `${job.id}:retry`} onClick={() => void performJobAction(job, 'retry')} aria-label={`Retry ${names[0] || 'failed job'}`}><RotateCcw className="h-3.5 w-3.5" aria-hidden />Retry</Button> : <span className="text-[var(--muted)]">—</span>}</td></tr>;
+          })}</tbody></table></div>}
+        </>}
+      </Card></Reveal>
+
+      <Reveal><div className="grid gap-4 md:grid-cols-3">{[{ href: '/settings#api-keys', icon: KeyRound, title: 'Developer access', description: 'Create and revoke your API keys.' }, { href: '/settings#sessions', icon: Smartphone, title: 'Signed-in devices', description: 'Review and manage active sessions.' }, { href: '/account#password', icon: ShieldCheck, title: 'Account security', description: 'Manage your sign-in credentials.' }].map(({ href, icon: Icon, title, description }) => <Link key={href} href={href} className="focus-ring surface group flex items-start gap-3 rounded-2xl p-5 transition-colors hover:border-brand-500/30"><Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand-500" aria-hidden /><div className="min-w-0"><h2 className="text-xs font-semibold">{title}</h2><p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">{description}</p></div><ArrowUpRight className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--muted)]" aria-hidden /></Link>)}</div></Reveal>
     </div>
-  );
+  </WorkspaceShell>;
 }
