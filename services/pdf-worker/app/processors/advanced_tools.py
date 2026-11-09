@@ -118,8 +118,8 @@ def apply_digital_signature(
     page_num: int = -1
 ) -> str:
     """
-    Stamps an enterprise digital seal with tamper-detection SHA-256 checksum,
-    audit timestamp, and visual certificate watermark on the specified page.
+    Draws a visual signature stamp (signer, reason, UTC timestamp and a SHA-256
+    prefix of the original file). This is not a certificate-based digital signature.
     """
     import hashlib
     from datetime import datetime
@@ -144,7 +144,7 @@ def apply_digital_signature(
 
     page.insert_text(
         pymupdf.Point(sig_x + 8, sig_y + 16),
-        f"DIGITALLY VERIFIED: {signer_name}",
+        f"Signed by: {signer_name}",
         fontsize=9,
         fontname="Helvetica-Bold",
         color=(0.06, 0.1, 0.2)
@@ -163,7 +163,7 @@ def apply_digital_signature(
     )
     page.insert_text(
         pymupdf.Point(sig_x + 8, sig_y + 53),
-        f"SHA-256 Seal: {file_sha256}... (DoD-Verified)",
+        f"Original SHA-256: {file_sha256}...",
         fontsize=6.5,
         fontname="Courier",
         color=(0.1, 0.4, 0.8)
@@ -220,7 +220,7 @@ def redact_sensitive_text(
 ) -> Dict[str, Any]:
     """
     Irreversibly redacts targeted keywords, PII, and custom search terms from PDF.
-    Physically zeroes underlying text and image bytes matching DoD 5220.22-M.
+    PyMuPDF apply_redactions() removes the matched text from the page content.
     """
     doc = pymupdf.open(input_path)
     targets = keywords or ["CONFIDENTIAL", "SSN", "PASSWORD", "SECRET"]

@@ -165,7 +165,6 @@ export class BillingService {
           'Max 25 MB per file upload',
           'Standard PyMuPDF compression',
           'Basic tools (Merge, Split, Rotate)',
-          'Community forum support',
         ],
         limits: {
           maxFileSizeMb: 25,
@@ -187,7 +186,6 @@ export class BillingService {
           'Unlimited daily PDF conversions',
           'Max 250 MB per file upload',
           'Full OCR & Multi-language Tesseract engine',
-          'Priority High-Speed processing queue',
           'AI Document Intelligence & RAG (500 queries/mo)',
           'Zero advertisements or brand watermarks',
         ],
@@ -205,15 +203,13 @@ export class BillingService {
         name: 'Team & Business',
         priceMonthly: 49,
         priceYearly: 490, // 17% savings
-        description: 'For growing organizations needing shared workspaces, RBAC, and dedicated APIs.',
+        description: 'For teams sharing documents in organizations.',
         features: [
           'Everything in Pro plus:',
-          'Up to 15 Team Workspaces with RBAC',
+          'Organizations with member roles',
           'Max 500 MB per file upload',
-          'Dedicated REST & GraphQL API Access (100k req/mo)',
+          'REST API access with API keys',
           'Custom brand watermarks & automated Bates numbering',
-          'DoD 5220.22-M zero data retention compliance',
-          '24/7 Priority SLA support',
         ],
         limits: {
           maxFileSizeMb: 500,
@@ -229,14 +225,9 @@ export class BillingService {
         name: 'Enterprise Cloud',
         priceMonthly: 199,
         priceYearly: 1990, // 17% savings
-        description: 'Dedicated infrastructure, custom SLAs, private on-premise RAG, and audit vaults.',
+        description: 'The highest usage limits.',
         features: [
           'Unlimited Team Seats & File Sizes (up to 2GB)',
-          'Dedicated Celery Worker Pod Cluster',
-          'Custom LLM & Private Air-Gapped RAG models',
-          'Single Sign-On (SAML / Okta / Azure AD)',
-          'Signed BAA for HIPAA / SOC2 Type II compliance',
-          'Dedicated Enterprise Solutions Architect',
         ],
         limits: {
           maxFileSizeMb: 2048,
