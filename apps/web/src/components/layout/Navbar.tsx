@@ -55,9 +55,8 @@ export const Navbar = () => {
   useEffect(() => {
     setMounted(true);
     syncProfile();
-    // syncProfile is stable on the store; run once on mount.
-
-  }, []);
+    // syncProfile is a stable store action, so this still runs once on mount.
+  }, [syncProfile]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
