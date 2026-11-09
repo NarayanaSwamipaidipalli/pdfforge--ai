@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Mail, MessageSquare, ShieldCheck, Clock, Building2, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Mail, MessageSquare, ShieldCheck, Building2, CheckCircle2, ArrowRight } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 
 export default function ContactPage() {
@@ -34,10 +34,10 @@ export default function ContactPage() {
             Contact & Solutions Engineering
           </span>
           <h1 className="text-3xl sm:text-4xl font-semibold text-zinc-900 tracking-tight mt-3 mb-2">
-            Let's discuss your document infrastructure
+            Get in touch
           </h1>
           <p className="text-xs sm:text-sm text-zinc-500">
-            Our solutions architects and engineering support team are available 24/7. Guaranteed response time under 1 hour for enterprise inquiries.
+            Send us a message and we will reply by email. No response-time commitment is offered.
           </p>
         </div>
 
@@ -61,20 +61,13 @@ export default function ContactPage() {
                 <div className="flex items-start gap-3">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
                   <div>
-                    <div className="font-medium text-zinc-900">Security & Compliance</div>
+                    <div className="font-medium text-zinc-900">Security reports</div>
                     <a href="mailto:security@doxera.in" className="text-zinc-500 hover:text-blue-600">
                       security@doxera.in
                     </a>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3">
-                  <Clock className="w-4 h-4 text-violet-600 mt-0.5 shrink-0" />
-                  <div>
-                    <div className="font-medium text-zinc-900">SLA Response Guarantee</div>
-                    <span className="text-zinc-500">&lt; 15 mins for Priority Enterprise</span>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -162,9 +155,9 @@ export default function ContactPage() {
                         className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-white"
                       >
                         <option value="Enterprise Sales">Enterprise Volume Licensing</option>
-                        <option value="Air-Gapped Deployment">Air-Gapped / Private VPC Deployment</option>
-                        <option value="Security Audit">Security & Compliance Audit (SOC2/HIPAA)</option>
-                        <option value="API Integration">High-Volume REST & GraphQL API</option>
+                        <option value="Air-Gapped Deployment">Self-hosted deployment</option>
+                        <option value="Security Audit">Security questions</option>
+                        <option value="API Integration">REST API integration</option>
                         <option value="Support">Technical Support</option>
                       </select>
                     </div>

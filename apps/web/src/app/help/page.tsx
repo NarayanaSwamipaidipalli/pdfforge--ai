@@ -21,7 +21,7 @@ export default function HelpCenterPage() {
       category: 'AI Document Intelligence',
       icon: Cpu,
       items: [
-        { title: 'How to switch between Cloud GPT-4o and On-Premise Air-Gapped Llama 3.1?', snippet: 'Use the model dropdown in AI Studio to enforce 100% Zero-Cloud Egress.' },
+        { title: 'How do I choose between OpenAI and a local Ollama model?', snippet: 'AI Studio lists the providers enabled on the server. A local Ollama model keeps document text on that server; OpenAI sends it to OpenAI.' },
         { title: 'How are citations calculated in document Q&A?', snippet: 'Our vector chunker maps semantic embeddings directly to PDF physical page coordinates.' },
         { title: 'Exporting structured invoice data to ERP systems', snippet: 'Invoice Extractor outputs standardized RFC 8259 JSON compatible with SAP and QuickBooks.' },
       ],

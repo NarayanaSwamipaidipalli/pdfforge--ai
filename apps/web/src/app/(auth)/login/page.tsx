@@ -369,7 +369,7 @@ function LoginForm() {
           {/* Security Assurance Badge */}
           <div className="pt-2 text-center text-[10px] text-zinc-400 flex items-center justify-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>256-Bit TLS Encryption & Zero-Retention Security</span>
+            <span>Uploaded files expire 24 hours after upload</span>
           </div>
         </div>
       </div>

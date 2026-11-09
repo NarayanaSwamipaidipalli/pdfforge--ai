@@ -1077,7 +1077,7 @@ export default function ToolPage({ params }: ToolPageProps) {
                       />
                       <label htmlFor="audit-trail" className="flex items-center gap-1.5 cursor-pointer">
                         <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Embed Cryptographic Audit Trail & SHA-256 Integrity Hash (eIDAS & ESIGN Compliant)</span>
+                        <span>Include UTC timestamp and SHA-256 fingerprint in the stamp (not a certificate-based signature)</span>
                       </label>
                     </div>
                   </div>

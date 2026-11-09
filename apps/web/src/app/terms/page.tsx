@@ -1,10 +1,9 @@
 import React from 'react';
 import Link from 'next/link';
-import { FileText, Shield, CheckCircle2 } from 'lucide-react';
 
 export const metadata = {
-  title: 'Terms of Service & Enterprise SLA',
-  description: 'Doxera Terms of Service, 99.99% Uptime Service Level Agreement, and Intellectual Property guarantees.',
+  title: 'Terms of Service',
+  description: 'Doxera Terms of Service.',
 };
 
 export default function TermsPage() {
@@ -14,7 +13,7 @@ export default function TermsPage() {
         {/* Header */}
         <div>
           <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
-            Legal Terms & SLA
+            Legal Terms
           </span>
           <h1 className="text-3xl sm:text-4xl font-semibold text-zinc-900 tracking-tight mt-3">
             Terms of Service & Customer Agreement
@@ -22,6 +21,19 @@ export default function TermsPage() {
           <p className="text-xs text-zinc-500 mt-2">
             Last Updated: October 2026 · Governing all access to Doxera Web, Mobile, and API services.
           </p>
+        </div>
+
+        {/*
+          LEGAL REVIEW REQUIRED before launch. Flagged, not rewritten:
+          - Section 3: the 99.99% uptime SLA and service-credit schedule were removed because no
+            availability commitment is backed by the service. Legal must decide what, if anything, replaces it.
+          - Section 1 refers to SDKs and mobile apps, and names no legal entity ("with Doxera If").
+          - Section 2 intellectual-property wording and section 4 prohibited uses need counsel's review.
+          - Section 5 says subscriptions renew automatically and mentions a Stripe Customer Portal;
+            current Razorpay orders are one-time payments and Stripe is not enabled.
+        */}
+        <div role="note" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-900">
+          These terms are a draft under legal review and may change before Doxera launches publicly.
         </div>
 
         {/* Content Body */}
@@ -41,18 +53,10 @@ export default function TermsPage() {
           </section>
 
           <section className="space-y-3">
-            <h2 className="text-base font-semibold text-zinc-900">3. Enterprise Service Level Agreement (99.99% Uptime SLA)</h2>
+            <h2 className="text-base font-semibold text-zinc-900">3. Service Availability</h2>
             <p>
-              Doxera commits to delivering <strong>99.99% monthly service availability</strong> for all Professional, Business, and Enterprise tiers:
+              Doxera does not currently offer an uptime commitment or service credits. This section is pending legal review.
             </p>
-            <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-200 space-y-2">
-              <div className="font-semibold text-zinc-900">SLA Remedy Schedule:</div>
-              <ul className="list-disc pl-5 space-y-1 text-zinc-600">
-                <li>&lt; 99.99% to 99.00% Availability: 10% Service Credit towards next billing cycle.</li>
-                <li>&lt; 99.00% to 95.00% Availability: 25% Service Credit.</li>
-                <li>&lt; 95.00% Availability: 50% Service Credit.</li>
-              </ul>
-            </div>
           </section>
 
           <section className="space-y-3">
