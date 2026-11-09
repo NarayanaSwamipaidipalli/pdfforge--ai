@@ -11,14 +11,14 @@ import { Reveal } from '@/components/ui/Motion';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { useToast } from '@/components/ui/Toast';
 import { WorkspaceShell, WorkspaceHeader, WorkspaceState } from '@/components/workspace/WorkspaceShell';
-import { Field, Panel, inputClass, errorMessage, useWorkspaceResource } from '@/components/workspace/WorkspaceForms';
+import { Field, Panel, inputClass, errorMessage, isListOf, useWorkspaceResource } from '@/components/workspace/WorkspaceForms';
 
 interface AccessKey { id: string; name: string; permissions: string[]; createdAt: string; lastUsedAt?: string }
 interface Session { id: string; userAgent?: string; ipAddress?: string; lastActiveAt: string; createdAt: string }
 type Confirmation = { kind: 'key' | 'session' | 'sessions'; id?: string; name?: string };
 export default function SettingsPage() {
-  const keys = useWorkspaceResource<AccessKey[]>('/auth/api-keys');
-  const sessions = useWorkspaceResource<Session[]>('/auth/sessions');
+  const keys = useWorkspaceResource<AccessKey[]>('/auth/api-keys', true, isListOf<AccessKey>);
+  const sessions = useWorkspaceResource<Session[]>('/auth/sessions', true, isListOf<Session>);
   const { logout } = useAuthStore();
   const { addToast } = useToast();
   const [createOpen, setCreateOpen] = useState(false);

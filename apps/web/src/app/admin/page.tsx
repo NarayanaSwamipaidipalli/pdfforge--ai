@@ -10,7 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Reveal } from '@/components/ui/Motion';
 import { useToast } from '@/components/ui/Toast';
 import { WorkspaceShell, WorkspaceHeader, WorkspaceState } from '@/components/workspace/WorkspaceShell';
-import { Field, Panel, inputClass, errorMessage, useWorkspaceResource } from '@/components/workspace/WorkspaceForms';
+import { Field, Panel, inputClass, errorMessage, isListOf, useWorkspaceResource } from '@/components/workspace/WorkspaceForms';
 
 type Tab = 'overview' | 'users' | 'jobs' | 'billing' | 'audit';
 interface Account { id: string; name?: string; email: string; globalRole: string; role?: string; plan: string; isBanned: boolean; storageUsedBytes?: string }
@@ -34,9 +34,9 @@ export default function AdminPage() {
   const telemetry = useWorkspaceResource<Telemetry>('/admin/telemetry', allowed && tab === 'overview');
   const users = useWorkspaceResource<{ users: Account[]; total: number }>('/admin/users?limit=25&offset=' + offset + '&search=' + encodeURIComponent(search), allowed && tab === 'users');
   const jobs = useWorkspaceResource<{ jobs: Job[]; total: number }>('/admin/jobs?limit=25&offset=' + offset, allowed && tab === 'jobs');
-  const payments = useWorkspaceResource<Payment[]>('/admin/transactions?limit=50', allowed && tab === 'billing');
-  const coupons = useWorkspaceResource<Coupon[]>('/admin/coupons', allowed && tab === 'billing');
-  const audit = useWorkspaceResource<Audit[]>('/admin/audit-logs?limit=50', allowed && tab === 'audit');
+  const payments = useWorkspaceResource<Payment[]>('/admin/transactions?limit=50', allowed && tab === 'billing', isListOf<Payment>);
+  const coupons = useWorkspaceResource<Coupon[]>('/admin/coupons', allowed && tab === 'billing', isListOf<Coupon>);
+  const audit = useWorkspaceResource<Audit[]>('/admin/audit-logs?limit=50', allowed && tab === 'audit', isListOf<Audit>);
   const [action, setAction] = useState<Action | null>(null);
   const [reason, setReason] = useState('');
   const [role, setRole] = useState('USER');

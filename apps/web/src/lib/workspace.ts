@@ -28,3 +28,15 @@ export async function downloadAuthenticated(endpoint: string, fallbackFilename: 
   document.body.appendChild(anchor); anchor.click(); anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+export interface OrganizationMember { id: string; userId: string; role: string; user: { email: string; name?: string | null } }
+export interface Organization { id: string; name: string; plan: string; myRole: string; storageUsedBytes?: string; storageLimitBytes?: string; members: OrganizationMember[] }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** Checks the fields the Organizations page dereferences, so a malformed response shows an error state instead of crashing. */
+export function isOrganizationList(value: unknown): value is Organization[] {
+  return Array.isArray(value) && value.every(org => isRecord(org) && typeof org.id === 'string' && typeof org.name === 'string' &&
+    Array.isArray(org.members) && org.members.every(member => isRecord(member) && typeof member.id === 'string' &&
+      typeof member.role === 'string' && isRecord(member.user) && typeof member.user.email === 'string'));
+}

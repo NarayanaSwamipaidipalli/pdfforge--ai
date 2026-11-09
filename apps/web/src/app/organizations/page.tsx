@@ -10,11 +10,11 @@ import { Reveal } from '@/components/ui/Motion';
 import { useToast } from '@/components/ui/Toast';
 import { WorkspaceShell, WorkspaceHeader, WorkspaceState } from '@/components/workspace/WorkspaceShell';
 import { Field, Panel, inputClass, errorMessage, useWorkspaceResource } from '@/components/workspace/WorkspaceForms';
+import { isOrganizationList } from '@/lib/workspace';
 
-interface Member { id: string; userId: string; role: string; user: { email: string; name?: string } }
-interface Organization { id: string; name: string; plan: string; myRole: string; storageUsedBytes?: string; storageLimitBytes?: string; members: Member[] }
+import type { OrganizationMember as Member, Organization } from '@/lib/workspace';
 export default function OrganizationsPage() {
-  const resource = useWorkspaceResource<Organization[]>('/organizations');
+  const resource = useWorkspaceResource<Organization[]>('/organizations', true, isOrganizationList);
   const [selected, setSelected] = useState('');
   const [modal, setModal] = useState<'create' | 'member' | 'remove' | null>(null);
   const [target, setTarget] = useState<Member | null>(null);
