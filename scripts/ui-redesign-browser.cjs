@@ -17,7 +17,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const defaultPlaywright = 'C:/Users/rough/AppData/Local/Temp/claude/2ad6d17696e33840/db3d4104-c59d-4d32-9b01-712bf8f1be57/scratchpad/vis/node_modules/playwright';
+// Set PLAYWRIGHT_MODULE_PATH to use a Playwright install outside this repository.
+const defaultPlaywright = 'playwright';
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || defaultPlaywright);
 const baseURL = (process.env.UI_TEST_BASE_URL || 'http://localhost:3100').replace(/\/$/, '');
 const origin = new URL(baseURL);

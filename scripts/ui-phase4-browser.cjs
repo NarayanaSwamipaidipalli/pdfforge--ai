@@ -8,7 +8,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'C:/Users/rough/AppData/Local/Temp/claude/2ad6d17696e33840/db3d4104-c59d-4d32-9b01-712bf8f1be57/scratchpad/vis/node_modules/playwright');
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const baseURL = process.env.UI_TEST_BASE_URL || 'http://localhost:3000';
 assert(['localhost', '127.0.0.1'].includes(new URL(baseURL).hostname));
 const output = path.resolve(__dirname, '../.remediation/ui-redesign/phase4');
