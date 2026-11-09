@@ -1,630 +1,71 @@
-'use client';
+﻿'use client';
 
-import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useState, type FormEvent } from 'react';
+import { KeyRound, Monitor, Palette, Copy, Trash2 } from 'lucide-react';
+import { ApiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/lib/auth-store';
-import { useToast } from '@/components/ui/Toast';
+import { formatDate } from '@/lib/billing';
+import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import {
-  User,
-  Shield,
-  Key,
-  Bell,
-  Lock,
-  Smartphone,
-  Copy,
-  CheckCircle2,
-  Trash2,
-  Plus,
-  RefreshCw,
-  QrCode,
-  LogOut,
-  AlertTriangle,
-  ArrowRight,
-} from 'lucide-react';
+import { Reveal } from '@/components/ui/Motion';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { useToast } from '@/components/ui/Toast';
+import { WorkspaceShell, WorkspaceHeader, WorkspaceState } from '@/components/workspace/WorkspaceShell';
+import { Field, Panel, inputClass, errorMessage, useWorkspaceResource } from '@/components/workspace/WorkspaceForms';
 
-const API_BASE = '';
-
-interface ApiKeyItem {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  rateLimitRpm: number;
-  lastUsedAt: string | null;
-  createdAt: string;
-}
-
+interface AccessKey { id: string; name: string; permissions: string[]; createdAt: string; lastUsedAt?: string }
+interface Session { id: string; userAgent?: string; ipAddress?: string; lastActiveAt: string; createdAt: string }
+type Confirmation = { kind: 'key' | 'session' | 'sessions'; id?: string; name?: string };
 export default function SettingsPage() {
-  const router = useRouter();
-  const { user, token, isAuthenticated, isHydrated, syncProfile, logout } = useAuthStore();
-
-  useEffect(() => {
-    if (isHydrated && !isAuthenticated && !token && typeof window !== 'undefined' && !localStorage.getItem('doxera_token')) {
-      router.push('/login?redirect=/settings');
-    }
-  }, [isHydrated, isAuthenticated, token, router]);
+  const keys = useWorkspaceResource<AccessKey[]>('/auth/api-keys');
+  const sessions = useWorkspaceResource<Session[]>('/auth/sessions');
+  const { logout } = useAuthStore();
   const { addToast } = useToast();
-
-  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'apikeys' | 'notifications'>('profile');
-  const [loading, setLoading] = useState(false);
-
-  // 2FA state
-  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
-  const [totpSecret, setTotpSecret] = useState<string | null>(null);
-  const [totpCode, setTotpCode] = useState('');
-  const [twoFaModalOpen, setTwoFaModalOpen] = useState(false);
-  const [twoFaLoading, setTwoFaLoading] = useState(false);
-  const [twoFaEnabled, setTwoFaEnabled] = useState(false);
-
-  // API Keys state
-  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
-  const [createKeyModalOpen, setCreateKeyModalOpen] = useState(false);
-  const [newKeyName, setNewKeyName] = useState('');
-  const [createdPlainKey, setCreatedPlainKey] = useState<string | null>(null);
-  const [copiedKey, setCopiedKey] = useState(false);
-
-  // Notification state
-  const [notifyJobComplete, setNotifyJobComplete] = useState(true);
-  const [notifySecurityAlerts, setNotifySecurityAlerts] = useState(true);
-  const [notifyWeeklyDigest, setNotifyWeeklyDigest] = useState(false);
-
-  const fetchSettingsData = async () => {
-    const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('doxera_token') : null);
-    if (!authToken) return;
-
+  const [createOpen, setCreateOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [plainKey, setPlainKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const createKey = async (event: FormEvent) => {
+    event.preventDefault(); if (busy) return; setBusy(true); setError('');
     try {
-      setLoading(true);
-      await syncProfile();
-
-      const res = await fetch(`${API_BASE}/api/v1/auth/api-keys`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setApiKeys(data || []);
-      }
-    } catch (err) {
-      console.warn('Could not load settings data:', err);
-    } finally {
-      setLoading(false);
-    }
+      const result = await ApiClient.request<{ apiKey: string }>('/auth/api-keys', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
+      if (!result.apiKey) throw new Error('The service did not return a key.');
+      setPlainKey(result.apiKey); keys.reload();
+    } catch (error) { setError(errorMessage(error)); } finally { setBusy(false); }
   };
-
-  useEffect(() => {
-    fetchSettingsData();
-  }, [token]);
-
-  // Handle 2FA Generation
-  const handleStart2Fa = async () => {
-    const authToken = token || localStorage.getItem('doxera_token');
-    if (!authToken) return;
-
-    setTwoFaLoading(true);
+  const revoke = async () => {
+    if (!confirmation || busy) return; setBusy(true); setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/2fa/generate`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to initialize 2FA');
-
-      setQrCodeUrl(data.qrCodeUrl || data.otpAuthUrl);
-      setTotpSecret(data.secret);
-      setTwoFaModalOpen(true);
-    } catch (err: any) {
-      addToast(err.message || 'Could not generate 2FA secret', 'error');
-    } finally {
-      setTwoFaLoading(false);
-    }
+      const endpoint = confirmation.kind === 'key' ? '/auth/api-keys/' + encodeURIComponent(confirmation.id!) : confirmation.kind === 'session' ? '/auth/sessions/' + encodeURIComponent(confirmation.id!) : '/auth/sessions';
+      await ApiClient.request(endpoint, { method: 'DELETE' });
+      if (confirmation.kind === 'key') { keys.reload(); addToast('API key revoked.', 'success'); }
+      else { await logout(); window.location.assign('/login'); }
+      setConfirmation(null);
+    } catch (error) { setError(errorMessage(error)); } finally { setBusy(false); }
   };
-
-  // Handle 2FA Verification
-  const handleVerify2Fa = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const authToken = token || localStorage.getItem('doxera_token');
-    if (!authToken) return;
-
-    setTwoFaLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/2fa/verify`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ code: totpCode.trim() }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Invalid 6-digit TOTP code');
-
-      setTwoFaEnabled(true);
-      setTwoFaModalOpen(false);
-      setTotpCode('');
-      addToast('Two-Factor Authentication is now active on your account!', 'success');
-      await syncProfile();
-    } catch (err: any) {
-      addToast(err.message || '2FA verification failed', 'error');
-    } finally {
-      setTwoFaLoading(false);
-    }
-  };
-
-  // Handle API Key Creation
-  const handleCreateApiKey = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const authToken = token || localStorage.getItem('doxera_token');
-    if (!authToken || !newKeyName.trim()) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/api-keys`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          name: newKeyName.trim(),
-          permissions: ['READ', 'WRITE'],
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to create API key');
-
-      setCreatedPlainKey(data.apiKey);
-      setNewKeyName('');
-      addToast('API key created successfully! Copy it now before it is masked.', 'success');
-      await fetchSettingsData();
-    } catch (err: any) {
-      addToast(err.message || 'Could not create API key', 'error');
-    }
-  };
-
-  // Handle API Key Revocation
-  const handleRevokeApiKey = async (keyId: string) => {
-    const authToken = token || localStorage.getItem('doxera_token');
-    if (!authToken) return;
-
-    if (!confirm('Are you sure you want to revoke this API key? Applications using it will lose access immediately.')) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/api-keys/${keyId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-
-      if (!res.ok) throw new Error('Failed to revoke API key');
-
-      setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
-      addToast('API key successfully revoked.', 'info');
-    } catch (err: any) {
-      addToast(err.message || 'Revocation failed', 'error');
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-[#fbfbfd] dark:bg-black text-zinc-900 dark:text-zinc-100 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1">
-            <Shield className="w-4 h-4" /> Account Governance
-          </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-            Settings & Security
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Manage your personal profile, cryptographic tokens, multi-factor authentication, and notifications.
-          </p>
-        </div>
-
-        {/* Navigation Tabs */}
-        <div className="flex border-b border-zinc-200 dark:border-zinc-800 space-x-8">
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`pb-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
-              activeTab === 'profile'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-            }`}
-          >
-            <User className="w-4 h-4" /> Profile
-          </button>
-          <button
-            onClick={() => setActiveTab('security')}
-            className={`pb-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
-              activeTab === 'security'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-            }`}
-          >
-            <Lock className="w-4 h-4" /> Security & 2FA
-          </button>
-          <button
-            onClick={() => setActiveTab('apikeys')}
-            className={`pb-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
-              activeTab === 'apikeys'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-            }`}
-          >
-            <Key className="w-4 h-4" /> API Credentials
-          </button>
-          <button
-            onClick={() => setActiveTab('notifications')}
-            className={`pb-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
-              activeTab === 'notifications'
-                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-            }`}
-          >
-            <Bell className="w-4 h-4" /> Notifications
-          </button>
-        </div>
-
-        {/* TAB 1: PROFILE */}
-        {activeTab === 'profile' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-2 bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
-              <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Profile Details</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    disabled
-                    value={user?.name || 'Administrator'}
-                    className="w-full px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    disabled
-                    value={user?.email || 'user@doxera.in'}
-                    className="w-full px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">System Role</label>
-                  <div className="px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-mono">
-                    {user?.role || 'USER'}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">Active Plan</label>
-                  <div className="px-3 py-2 text-xs border border-emerald-200 dark:border-emerald-900 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-semibold flex items-center justify-between">
-                    <span>{user?.plan || 'ENTERPRISE'}</span>
-                    <Link href="/billing" className="text-[11px] underline hover:text-emerald-900 dark:hover:text-emerald-200">
-                      Manage Billing
-                    </Link>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-center text-xs text-zinc-500">
-                <span>Account ID: <code className="font-mono text-zinc-700 dark:text-zinc-300">{user?.id || 'usr_prod_live'}</code></span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Identity Verified
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-2">Authentication Status</h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed mb-4">
-                  Signed in with cryptographic JSON Web Tokens protected under zero-retention session isolation.
-                </p>
-                <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-500">Session State</span>
-                    <span className="text-emerald-600 font-semibold">Active & Valid</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-500">Token Algorithm</span>
-                    <span className="font-mono text-zinc-700 dark:text-zinc-300">RS256 / SHA-256</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  logout();
-                  window.location.href = '/login';
-                }}
-                className="mt-6 w-full py-2.5 px-4 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition flex items-center justify-center gap-2 border border-rose-200 dark:border-rose-900/60"
-              >
-                <LogOut className="w-3.5 h-3.5" /> Sign Out of Platform
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: SECURITY & 2FA */}
-        {activeTab === 'security' && (
-          <div className="space-y-6">
-            <div className="bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-base font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                    <Smartphone className="w-5 h-5 text-blue-600" />
-                    Two-Factor Authentication (2FA)
-                  </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xl">
-                    Add an extra layer of security using Google Authenticator, 1Password, or any standard TOTP authenticator app.
-                  </p>
-                </div>
-                {twoFaEnabled ? (
-                  <div className="px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" /> 2FA Active
-                  </div>
-                ) : (
-                  <button
-                    onClick={handleStart2Fa}
-                    disabled={twoFaLoading}
-                    className="py-2 px-4 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition shadow-sm flex items-center gap-2"
-                  >
-                    <QrCode className="w-4 h-4" /> Configure 2FA
-                  </button>
-                )}
-              </div>
-
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 block">Password Protection</span>
-                  <span className="text-[11px] text-zinc-500">Change your master login password or send recovery verification</span>
-                </div>
-                <Link
-                  href="/forgot-password"
-                  className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                >
-                  Send Reset Link <ArrowRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: API KEYS */}
-        {activeTab === 'apikeys' && (
-          <div className="bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-base font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                  <Key className="w-5 h-5 text-indigo-600" /> Developer API Keys
-                </h2>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xl">
-                  Use API keys to authenticate headless SDKs, CLI utilities, and high-throughput CI/CD pipelines.
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setCreatedPlainKey(null);
-                  setCreateKeyModalOpen(true);
-                }}
-                className="py-2 px-4 rounded-xl text-xs font-semibold text-white bg-zinc-900 dark:bg-white dark:text-zinc-900 hover:bg-zinc-800 transition shadow-sm flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" /> Generate New Key
-              </button>
-            </div>
-
-            {/* Keys Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-zinc-200 dark:border-zinc-800 text-zinc-400 uppercase tracking-wider font-semibold">
-                    <th className="py-3 px-4">Key Label</th>
-                    <th className="py-3 px-4">Prefix</th>
-                    <th className="py-3 px-4">Rate Limit</th>
-                    <th className="py-3 px-4">Created</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
-                  {apiKeys.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-zinc-400">
-                        No active API keys found. Generate a key to begin automating with the Python or Node.js SDK.
-                      </td>
-                    </tr>
-                  ) : (
-                    apiKeys.map((k) => (
-                      <tr key={k.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
-                        <td className="py-3 px-4 font-semibold text-zinc-900 dark:text-zinc-100">{k.name}</td>
-                        <td className="py-3 px-4 font-mono text-zinc-600 dark:text-zinc-400">{k.keyPrefix}••••••••</td>
-                        <td className="py-3 px-4 text-zinc-600 dark:text-zinc-400">{k.rateLimitRpm || 1000} req/min</td>
-                        <td className="py-3 px-4 text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => handleRevokeApiKey(k.id)}
-                            className="p-1.5 text-zinc-400 hover:text-rose-600 transition"
-                            title="Revoke key"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: NOTIFICATIONS */}
-        {activeTab === 'notifications' && (
-          <div className="bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
-            <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Communication Preferences</h2>
-            <div className="space-y-4 max-w-2xl">
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700">
-                <div>
-                  <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 block">Job Completion Alerts</span>
-                  <span className="text-[11px] text-zinc-500">Receive an email when large batch conversions and OCR runs finish.</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifyJobComplete}
-                  onChange={(e) => {
-                    setNotifyJobComplete(e.target.checked);
-                    addToast('Notification preferences saved', 'info');
-                  }}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700">
-                <div>
-                  <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 block">Critical Security Notices</span>
-                  <span className="text-[11px] text-zinc-500">Instant notification upon new logins, IP anomalies, or API key changes.</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifySecurityAlerts}
-                  onChange={(e) => {
-                    setNotifySecurityAlerts(e.target.checked);
-                    addToast('Notification preferences saved', 'info');
-                  }}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700">
-                <div>
-                  <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 block">Weekly Quota & Intelligence Digest</span>
-                  <span className="text-[11px] text-zinc-500">Executive summary of OCR pages, RAG queries, and storage footprint.</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifyWeeklyDigest}
-                  onChange={(e) => {
-                    setNotifyWeeklyDigest(e.target.checked);
-                    addToast('Notification preferences saved', 'info');
-                  }}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 2FA Setup Modal */}
-      <Modal isOpen={twoFaModalOpen} onClose={() => setTwoFaModalOpen(false)} title="Configure Two-Factor Authentication">
-        <form onSubmit={handleVerify2Fa} className="space-y-4">
-          <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-            Scan the QR code below or enter the manual secret into your authenticator app, then provide the generated 6-digit code.
-          </p>
-
-          {totpSecret && (
-            <div className="p-3 bg-zinc-100 dark:bg-zinc-800 rounded-xl text-center">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Manual Setup Key</span>
-              <code className="text-xs font-mono font-bold text-zinc-900 dark:text-white tracking-widest">{totpSecret}</code>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">6-Digit Code</label>
-            <input
-              type="text"
-              maxLength={6}
-              required
-              value={totpCode}
-              onChange={(e) => setTotpCode(e.target.value)}
-              placeholder="000000"
-              className="w-full text-center tracking-widest text-lg font-mono px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-blue-500/20"
-            />
-          </div>
-
-          <div className="pt-2 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setTwoFaModalOpen(false)}
-              className="px-4 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 rounded-xl"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={twoFaLoading || totpCode.length < 6}
-              className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl"
-            >
-              {twoFaLoading ? 'Verifying...' : 'Verify & Enable'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* API Key Modal */}
-      <Modal isOpen={createKeyModalOpen} onClose={() => setCreateKeyModalOpen(false)} title="Create API Access Key">
-        {createdPlainKey ? (
-          <div className="space-y-4">
-            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-              <span>Copy your API key now. This secret will never be displayed again.</span>
-            </div>
-
-            <div className="flex items-center gap-2 p-3 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 font-mono text-xs break-all">
-              <span className="flex-1">{createdPlainKey}</span>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(createdPlainKey);
-                  setCopiedKey(true);
-                  setTimeout(() => setCopiedKey(false), 2000);
-                  addToast('Key copied to clipboard', 'info');
-                }}
-                className="p-1.5 rounded-lg bg-white dark:bg-zinc-700 hover:bg-zinc-200 text-zinc-700 dark:text-zinc-200 transition"
-              >
-                {copiedKey ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-              </button>
-            </div>
-
-            <button
-              onClick={() => setCreateKeyModalOpen(false)}
-              className="w-full py-2.5 rounded-xl text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 transition"
-            >
-              Done & Dismiss
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={handleCreateApiKey} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Key Description / Purpose</label>
-              <input
-                type="text"
-                required
-                value={newKeyName}
-                onChange={(e) => setNewKeyName(e.target.value)}
-                placeholder="e.g. Production Ingestion Pipeline"
-                className="w-full px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-700 rounded-xl focus:ring-2 focus:ring-blue-500/20"
-              />
-            </div>
-            <div className="pt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setCreateKeyModalOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={!newKeyName.trim()}
-                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl"
-              >
-                Create Key
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
-    </div>
-  );
+  return <WorkspaceShell>
+    <WorkspaceHeader eyebrow="Make it yours" title="Settings" description="Appearance, developer access and the sessions connected to your account." />
+    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="space-y-6">
+      <Reveal><Panel title="Appearance" description="Your theme preference is saved in this browser."><div className="flex items-center justify-between gap-4"><div className="flex items-center gap-3"><Palette className="h-5 w-5 text-brand-500" /><p className="text-sm font-medium">Light & dark themes</p></div><ThemeToggle /></div></Panel></Reveal>
+      <Reveal><Panel id="api-keys" title="API keys" description="Create named access keys and revoke them when no longer needed.">
+        <div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm text-[var(--muted)]"><KeyRound className="h-4 w-4" />{keys.loading ? 'Loading keys…' : keys.data ? keys.data.length + ' active keys' : 'Keys unavailable'}</span><Button onClick={() => { setName(''); setPlainKey(''); setError(''); setCreateOpen(true); }}>Create API key</Button></div>
+        {keys.error ? <WorkspaceState error={keys.error} onRetry={keys.reload} /> : keys.loading ? <WorkspaceState loading title="Loading access keys…" /> : !keys.data?.length ? <p className="rounded-xl border border-dashed border-[var(--card-border)] p-6 text-sm text-[var(--muted)]">No API keys yet. Create one when you need programmatic access.</p> : <ul className="divide-y divide-[var(--card-border)]">{keys.data.map(key => <li key={key.id} className="flex items-start justify-between gap-3 py-4"><div className="min-w-0"><p className="break-words text-sm font-semibold">{key.name}</p><p className="mt-1 break-words text-xs text-[var(--muted)]">{key.permissions.join(', ')}</p><p className="mt-2 text-xs text-[var(--muted)]">Created {formatDate(key.createdAt)} · Last used {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'never'}</p></div><button className="focus-ring shrink-0 rounded-lg p-2 text-[var(--muted)] hover:text-rose-500" aria-label={'Revoke key ' + key.name} onClick={() => { setError(''); setConfirmation({ kind: 'key', id: key.id, name: key.name }); }}><Trash2 className="h-4 w-4" /></button></li>)}</ul>}
+      </Panel></Reveal>
+      <Reveal><Panel id="sessions" title="Sessions" description="Review the sign-ins recorded for your account. Revoking a session also invalidates account refresh credentials and signs you out here.">
+        <div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={sessions.reload} loading={sessions.loading}>Refresh sessions</Button><Button variant="ghost" disabled={!sessions.data?.length} onClick={() => { setError(''); setConfirmation({ kind: 'sessions' }); }}>Revoke all sessions</Button></div>
+        {sessions.error ? <WorkspaceState error={sessions.error} onRetry={sessions.reload} /> : sessions.loading ? <WorkspaceState loading title="Loading sessions…" /> : !sessions.data?.length ? <p className="text-sm text-[var(--muted)]">No active session records returned.</p> : <ul className="divide-y divide-[var(--card-border)]">{sessions.data.map(session => <li key={session.id} className="flex items-start gap-3 py-4"><Monitor className="mt-1 h-5 w-5 shrink-0 text-brand-500" /><div className="min-w-0 flex-1"><p className="break-all text-xs leading-relaxed">{session.userAgent || 'Device information unavailable'}</p><p className="mt-2 text-xs text-[var(--muted)]">IP: {session.ipAddress || 'Unavailable'}</p><p className="mt-1 text-xs text-[var(--muted)]">Last active {formatDate(session.lastActiveAt)}</p></div><button className="focus-ring shrink-0 rounded-lg p-2 text-[var(--muted)] hover:text-rose-500" aria-label={'Revoke session ' + session.id} onClick={() => { setError(''); setConfirmation({ kind: 'session', id: session.id }); }}><Trash2 className="h-4 w-4" /></button></li>)}</ul>}
+      </Panel></Reveal>
+    </div><div className="space-y-6">
+      <Reveal><Panel title="Account security"><p className="text-sm leading-relaxed text-[var(--muted)]">Manage your password and connected Google sign-in from your account.</p><Button href="/account#password" variant="secondary" className="w-full">Account security</Button><div className="rounded-xl bg-brand-500/5 p-4"><p className="text-sm font-medium">Two-factor authentication</p><p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">Setup is currently unavailable. The service does not yet support verified TOTP enrollment.</p></div></Panel></Reveal>
+      <Reveal><Panel title="Notifications"><p className="text-sm leading-relaxed text-[var(--muted)]">Email notification preferences are not available yet. Check your dashboard for document processing updates.</p><Button href="/dashboard" variant="ghost">View activity</Button></Panel></Reveal>
+    </div></div>
+    <Modal isOpen={createOpen} onClose={() => { setCreateOpen(false); setPlainKey(''); }} busy={busy} title={plainKey ? 'Save your API key' : 'Create API key'}>
+      {plainKey ? <div className="space-y-5"><p className="text-sm text-[var(--muted)]">Copy this secret now and store it securely. It is only shown once.</p><code className="block break-all rounded-xl bg-[var(--background)] p-4 text-sm">{plainKey}</code><Button variant="secondary" onClick={async () => { try { await navigator.clipboard.writeText(plainKey); addToast('API key copied.', 'success'); } catch { setError('Clipboard access failed. Select and copy the key manually.'); } }}><Copy className="h-4 w-4" /> Copy key</Button><Button onClick={() => { setCreateOpen(false); setPlainKey(''); }}>Done</Button>{error && <p role="alert" className="text-sm text-rose-500">{error}</p>}</div> : <form onSubmit={createKey} className="space-y-5"><Field label="Key name"><input className={inputClass} required maxLength={120} value={name} onChange={event => setName(event.target.value)} placeholder="Document automation" /></Field><p className="text-xs text-[var(--muted)]">Uses the service’s default PDF read and write permissions.</p>{error && <p role="alert" className="text-sm text-rose-500">{error}</p>}<Button type="submit" loading={busy} disabled={!name.trim()}>Create key</Button></form>}
+    </Modal>
+    <Modal isOpen={!!confirmation} onClose={() => setConfirmation(null)} busy={busy} title={confirmation?.kind === 'key' ? 'Revoke this API key?' : 'Revoke sessions?'}>
+      <div className="space-y-5"><p className="break-words text-sm text-[var(--muted)]">{confirmation?.kind === 'key' ? 'Applications using ' + confirmation.name + ' will lose access. This cannot be undone.' : 'This invalidates account refresh credentials. You will need to sign in again.'}</p>{error && <p role="alert" className="text-sm text-rose-500">{error}</p>}<div className="flex flex-wrap justify-end gap-2"><Button variant="secondary" disabled={busy} onClick={() => setConfirmation(null)}>Cancel</Button><Button variant="danger" loading={busy} onClick={revoke}>Revoke access</Button></div></div>
+    </Modal>
+  </WorkspaceShell>;
 }
