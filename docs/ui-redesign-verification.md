@@ -75,7 +75,42 @@ Rerun after taking over the branch, without modifying any source file:
 
 The probe used a seeded session and answered every `/api/v1` request locally, so it exercised hydration and rendering only, not backend behaviour. It sent nothing to the development API or database. The four real-backend browser suites were **not** rerun in this session because they register accounts and write jobs and organizations to the development database. Rerunning `ui-redesign-browser.cjs` against a fresh production build is the remaining step to replace the 28/1 result above.
 
-Pages outside this redesign still contain unsupported claims that predate it and were not changed: `about` (DoD 5220.22-M, "100M+", "99.99%"), `blog` (DoD 5220.22-M), `features` (DoD purge comparison), `terms` (a 99.99% uptime SLA with service credits) and the global `error.tsx` ("DoD 5220.22-M Zero Data Retention Guard Active").
+## Corrections and checks on 2026-11-09 (second pass)
+
+**Unsupported claims removed.** An audit found the same kinds of claims well beyond the five named pages:
+- **About, blog, features, error boundary:** volume, uptime and latency figures; DoD 5220.22-M; four non-existent blog articles; a competitor comparison table.
+- **Login, contact, help, tools page and tool registry:** FIPS-140-2, eIDAS/ESIGN, GDPR/HIPAA, air-gapped AI and response-time guarantees.
+- **API plan catalog:** DoD, a HIPAA BAA / SOC 2, SAML SSO, GraphQL, a priority queue, a dedicated cluster and 24/7 SLA support.
+- **Text the worker writes into users' files:** "DIGITALLY VERIFIED … (DoD-Verified)" on e-sign stamps, and a DoD "compliance flag" in contract analysis.
+
+Replacement copy states only behaviour confirmed in code: 24-hour file expiry with a 15-minute cleanup job, Ollama/OpenAI/extractive AI, AES-256 encryption, Tesseract OCR and the existing SDKs/CLI. The redesigned Pricing page builds its feature list from plan limits, so the catalog strings were not visible there, but `/billing/plans` serves them publicly. Prices, limits and payment logic were not changed.
+
+**Terms: legal review required.** The 99.99% SLA and service-credit schedule were removed and nothing was put in their place. A visible draft notice was added. Flagged, but not rewritten:
+- Section 1 mentions SDKs and mobile apps and names no legal entity.
+- Sections 2 and 4 (intellectual property, prohibited uses) need counsel's review.
+- Section 5 describes automatic renewal and a Stripe Customer Portal, but current Razorpay orders are one-time and Stripe is disabled.
+
+**Organizations crash.** `useWorkspaceResource` now takes an optional validator. A malformed response shows the retryable error state instead of the error boundary. Organizations validates the fields it dereferences; the Settings and Admin list endpoints require arrays. This is covered by 8 unit tests and by a browser check with an injected malformed response.
+
+**Personal data.** Your email address, Razorpay order/payment/webhook IDs, partial internal IDs and tunnel hostnames were removed from `AI_HANDOFF.md`. This was folded into the unpushed docs commit, so no branch commit contains them. The recovery stash was not inspected or changed.
+
+**Lint.** ESLint 8.57.1 with `next/core-web-vitals` (eslint-config-next 15.5.4) was installed outside the project and run over `apps/web/src`. It found 1 error and 2 warnings, all predating the redesign. Two were fixed: the unescaped apostrophe on Contact and the Navbar hook dependency. One warning remains, in `(auth)/verify-email` (`handleVerify` dependency), in an auth flow this branch does not change. The rule set does not report unused imports.
+
+| Check | Result |
+| --- | --- |
+| Web TypeScript | Passed |
+| Web unit tests | 70 passed, 4 files |
+| API tests | 181 passed, 17 suites |
+| Worker tests (disposable container) | 37 passed, 43 subtests |
+| E-sign and contract functions on a generated PDF (disposable container, mounted source) | The stamp reads "Signed by" and "Original SHA-256"; no DoD/"verified" text; no DoD compliance flag |
+| Next.js production build | Passed, 33 pages |
+| Lint (`next/core-web-vitals`) | 0 errors, 1 warning that predates the redesign |
+| Secret scan of the working tree and `origin/main...HEAD` | No keys, tokens, private keys, tunnel hosts, payment IDs or personal emails |
+| Mocked hydration probe, fresh production build | 90/90 page loads clean across 15 routes, three viewport/motion configurations and both themes; malformed `/organizations` shows the error state |
+
+**Not yet run: the real-backend Pricing/Billing suite.** The API allows browser requests only from `http://localhost:3000`, and the Next proxy forwards the `Origin` header. That port was held by a development server from the previous session, which this session was not permitted to stop. The 28/1 result above therefore still stands as the latest real-backend Pricing/Billing run.
+
+Running containers still use their existing images, so the worker's stamp text changes take effect only after the worker image is rebuilt.
 
 ## Local evidence and reproduction
 
